@@ -1,0 +1,111 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="container-xl">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fa fa-cogs me-2"></i> Environment Variables</h3>
+                    <div class="card-actions ms-auto">
+                        <button type="button" class="btn btn-primary" onclick="openModal('', '')">
+                            <i class="fa fa-plus me-2"></i> Add Variable
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-vcenter card-table table-hover">
+                            <thead>
+                                <tr>
+                                    <th style="width: 30%;">Key</th>
+                                    <th style="width: 55%;">Value</th>
+                                    <th style="width: 15%;" class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for key, value in env_vars.items() %}
+                                <tr>
+                                    <td class="font-monospace text-primary">{{ key }}</td>
+                                    <td class="text-truncate" style="max-width: 300px;">
+                                        <code class="text-muted">{{ value }}</code>
+                                    </td>
+                                    <td class="text-end">
+                                        <div class="btn-list justify-content-end">
+                                            <button class="btn btn-icon btn-ghost-secondary"
+                                                    onclick="openModal('{{ key }}', '{{ value | replace("'", "\\'") }}')" title="Edit">
+                                                <i class="fa fa-edit"></i>
+                                            </button>
+                                            <form method="post" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete {{ key }}?');">
+                                                <input type="hidden" name="action" value="delete">
+                                                <input type="hidden" name="key" value="{{ key }}">
+                                                <button type="submit" class="btn btn-icon btn-ghost-danger" title="Delete">
+                                                    <i class="fa fa-trash"></i>
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit/Add Modal -->
+<div class="modal modal-blur fade" id="envModal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" role="document">
+        <div class="modal-content">
+            <form method="post">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalTitle">Edit Variable</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="update">
+
+                    <div class="mb-3">
+                        <label class="form-label required" for="envKey">Key</label>
+                        <input type="text" class="form-control font-monospace" id="envKey" name="key" required placeholder="e.g. DATABASE_URL">
+                        <small class="form-hint">Keys typically use UPPERCASE_WITH_UNDERSCORES.</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label required" for="envValue">Value</label>
+                        <textarea class="form-control font-monospace" id="envValue" name="value" rows="3" required placeholder="Enter value..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-link link-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary ms-auto">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    function openModal(key, value) {
+        document.getElementById('envKey').value = key;
+        document.getElementById('envValue').value = value;
+
+        var title = key ? 'Edit Variable' : 'Add New Variable';
+        document.getElementById('modalTitle').innerText = title;
+
+        if(key) {
+            document.getElementById('envKey').readOnly = true;
+        } else {
+            document.getElementById('envKey').readOnly = false;
+        }
+
+        // Bootstrap 5 Modal toggle
+        var myModal = new bootstrap.Modal(document.getElementById('envModal'));
+        myModal.show();
+    }
+</script>
+{% endblock %}

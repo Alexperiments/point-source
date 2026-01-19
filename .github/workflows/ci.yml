@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      checks: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v1
+        with:
+          enable-cache: true
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Load environment variables
+        run: |
+          set -a
+          source ci.env
+          set +a
+          env | grep -E '^(ENVIRONMENT|LOGFIRE_TOKEN|DATABASE_|REDIS_|JWT_|LITELLM_|DEBUG|ACCESS_TOKEN_|ALLOWED_ORIGINS)' >> $GITHUB_ENV
+
+      - name: Run tests
+        run: uv run nox -s test -- --junitxml junit.xml
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: junit.xml

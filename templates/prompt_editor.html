@@ -1,0 +1,320 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<style>
+    /* Professional Editor Styling - Inherits Emerald Theme from Base */
+
+    .prompt-wrapper {
+        height: calc(100vh - 120px);
+        display: flex;
+        flex-direction: column;
+        background: transparent;
+    }
+
+    .editor-layout {
+        display: flex;
+        flex: 1;
+        gap: 0;
+        min-height: 0;
+        background: var(--tblr-card-bg, #1e293b);
+        border: 1px solid var(--tblr-border-color);
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Sidebar - List */
+    .sidebar-list {
+        flex: 0 0 280px;
+        border-right: 1px solid var(--tblr-border-color);
+        background: var(--tblr-bg-surface, #1e293b);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .sidebar-header {
+        padding: 20px;
+        border-bottom: 1px solid var(--tblr-border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .list-scroll {
+        overflow-y: auto;
+        flex: 1;
+    }
+
+    /* Editor Area */
+    .main-editor {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        padding: 0;
+        background: var(--tblr-card-bg);
+        min-width: 0;
+    }
+
+    .editor-header {
+        padding: 24px 28px;
+        border-bottom: 1px solid var(--tblr-border-color);
+    }
+
+    .code-area {
+        flex: 1;
+        padding: 24px 28px;
+        background: rgba(0,0,0,0.1); /* Slight darken for contrast */
+        display: flex;
+        flex-direction: column;
+    }
+
+    .prompt-textarea {
+        flex: 1;
+        width: 100%;
+        font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+        font-size: 14px;
+        line-height: 1.6;
+        padding: 18px;
+        border: 1px solid var(--tblr-border-color);
+        border-radius: 6px;
+        background-color: var(--tblr-bg-surface);
+        color: var(--tblr-body-color);
+        resize: none;
+        outline: none;
+        transition: border-color 0.2s ease;
+    }
+
+    .prompt-textarea:focus {
+        border-color: var(--tblr-primary);
+        box-shadow: 0 0 0 2px rgba(var(--tblr-primary-rgb), 0.1);
+    }
+
+    /* Right Sidebar - History */
+    .sidebar-history {
+        flex: 0 0 320px;
+        border-left: 1px solid var(--tblr-border-color);
+        background: var(--tblr-bg-surface);
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* List Items */
+    .list-group-item {
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid var(--tblr-border-color-light);
+        padding: 14px 20px;
+        color: var(--tblr-body-color);
+    }
+
+    .list-group-item:hover {
+        background: rgba(255,255,255, 0.05);
+    }
+
+    .list-group-item.active {
+        background: rgba(var(--tblr-primary-rgb), 0.1);
+        border-left: 3px solid var(--tblr-primary);
+        color: var(--tblr-primary-fg); /* Ensure text is readable */
+    }
+
+    .list-group-item.active .text-muted {
+        color: rgba(255,255,255, 0.7) !important;
+    }
+
+    .list-group-item.active .font-weight-bold {
+        color: var(--tblr-primary);
+    }
+
+    /* Version Items */
+    .version-item {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--tblr-border-color);
+        cursor: pointer;
+        transition: background 0.15s ease;
+    }
+
+    .version-item:hover {
+        background: rgba(255,255,255, 0.05);
+    }
+
+    .version-item.active {
+        background: rgba(var(--tblr-primary-rgb), 0.05);
+        border-left: 3px solid var(--tblr-primary);
+    }
+
+    .badge-emerald {
+        background: var(--tblr-primary);
+        color: #fff;
+    }
+
+    .btn-outline-primary {
+        color: var(--tblr-primary);
+        border-color: var(--tblr-primary);
+    }
+    .btn-outline-primary:hover {
+        background: var(--tblr-primary);
+        color: #fff;
+    }
+
+    /* Form Controls */
+    .input-group-text {
+        background: var(--tblr-bg-surface-secondary);
+        border-color: var(--tblr-border-color);
+        color: var(--tblr-body-color);
+    }
+
+    .form-control {
+        background: var(--tblr-bg-surface);
+        border-color: var(--tblr-border-color);
+        color: var(--tblr-body-color);
+    }
+
+    .form-control:focus {
+        border-color: var(--tblr-primary);
+    }
+</style>
+
+<div class="container-fluid prompt-wrapper">
+    <div class="editor-layout">
+
+        <!-- LEFT: Sidebar List -->
+        <div class="sidebar-list">
+            <div class="sidebar-header">
+                <span class="font-weight-bold">Prompt Library</span>
+                <a href="{{ url_for('admin:prompt_editor') }}" class="btn btn-sm btn-icon btn-ghost-secondary" title="Create New Prompt">
+                    <i class="fa fa-plus"></i>
+                </a>
+            </div>
+            <div class="list-scroll list-group list-group-flush">
+                {% for p in prompts %}
+                <a href="?prompt_id={{ p.id }}"
+                   class="list-group-item list-group-item-action {% if (p.id | string) == current_prompt_id %}active{% endif %}">
+                   <div class="d-flex w-100 justify-content-between align-items-center">
+                    <span class="font-weight-bold text-truncate">{{ p.slug }}</span>
+                </div>
+                    <small class="text-muted text-truncate d-block">
+                        {{ p.name }}
+                    </small>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- CENTER: Editor -->
+        <div class="main-editor">
+            <form method="post" id="promptForm" class="h-100 d-flex flex-column">
+                <input type="hidden" name="action" value="save_commit">
+                <input type="hidden" name="prompt_id" value="{{ selected_prompt.id if selected_prompt else '' }}">
+
+                <!-- Metadata Header -->
+                <div class="editor-header">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <div>
+                            <h2 class="h3 m-0">
+                                {% if selected_prompt %}{{ selected_prompt.name }}{% else %}Create New Prompt{% endif %}
+                            </h2>
+                            <small class="text-muted">
+                                {% if selected_prompt %}Edit and manage prompt versions{% else %}Define a new prompt template{% endif %}
+                            </small>
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fa fa-save me-2"></i> Save Version
+                        </button>
+                    </div>
+
+                    <div class="row g-2">
+                        <div class="col-md-6">
+                            <div class="input-group input-group-sm">
+                                <div class="input-group-text">Slug</div>
+                                <input type="text" name="slug" class="form-control font-monospace" required
+                                       placeholder="customer_support_agent"
+                                       value="{{ selected_prompt.slug if selected_prompt else '' }}">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="input-group input-group-sm">
+                                <div class="input-group-text">Name</div>
+                                <input type="text" name="name" class="form-control" required
+                                       placeholder="Customer Support Agent"
+                                       value="{{ selected_prompt.name if selected_prompt else '' }}">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Text Area -->
+                <div class="code-area">
+                    <textarea name="content" id="promptContent" class="prompt-textarea mb-3" required
+                        placeholder="Write your prompt template here... Use {variable} for dynamic content.">{{ selected_prompt.content if selected_prompt else '' }}</textarea>
+
+                    <div class="mt-auto">
+                        <input type="text" name="commit_message" class="form-control form-control-sm"
+                               placeholder="Describe your changes (e.g., 'Improved tone for customer empathy')" required>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <!-- RIGHT: History -->
+        <div class="sidebar-history">
+            <div class="sidebar-header">
+                <span class="font-weight-bold text-muted">Version History</span>
+            </div>
+            <div class="list-scroll">
+                {% if selected_prompt and selected_prompt.versions %}
+                    {% for ver in selected_prompt.versions %}
+                    <div class="version-item {% if ver.is_active %}active{% endif %}"
+                         onclick="viewVersion(`{{ ver.content | replace('`', '\\`') | replace('\n', '\\n') }}`)">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="badge bg-secondary-lt">v{{ ver.version_number }}</span>
+                            <small class="text-muted">{{ ver.created_at.strftime('%b %d') }}</small>
+                        </div>
+                        <div class="small mb-2 fw-bold text-truncate">
+                            {{ ver.commit_message or 'No message' }}
+                        </div>
+
+                        <div class="d-flex justify-content-between align-items-center mt-2">
+                            {% if ver.is_active %}
+                                <span class="badge badge-emerald">ACTIVE</span>
+                            {% else %}
+                                <span></span>
+                                <form method="post" style="display:inline;" onsubmit="return confirm('Rollback to this version?');">
+                                    <input type="hidden" name="action" value="activate_version">
+                                    <input type="hidden" name="prompt_id" value="{{ selected_prompt.id }}">
+                                    <input type="hidden" name="version_id" value="{{ ver.id }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-primary py-0 px-2">
+                                        Activate
+                                    </button>
+                                </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="p-4 text-center text-muted">
+                        <i class="fa fa-history fa-2x mb-3"></i>
+                        <p class="small">No version history yet.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+    function viewVersion(content) {
+        const textarea = document.getElementById('promptContent');
+        const originalContent = textarea.value;
+
+        // Decode escaped content
+        textarea.value = content.replace(/\\n/g, '\n').replace(/\\`/g, '`');
+
+        // Visual feedback (Flash border instead of background to stay clean in dark mode)
+        textarea.style.borderColor = "var(--tblr-primary)";
+        setTimeout(() => {
+            textarea.style.borderColor = "";
+        }, 400);
+    }
+</script>
+{% endblock %}
