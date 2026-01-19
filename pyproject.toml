@@ -1,5 +1,5 @@
 [project]
-name = "pydantic-ai-production-ready-template"
+name = "point-source"
 version = "0.1.0"
 description = "Pydantic AI Production Ready Template"
 readme = "README.md"
@@ -21,6 +21,7 @@ dependencies = [
     "bcrypt>=5.0.0",
     "itsdangerous>=2.2.0",
     "typer>=0.20.0",
+    "pgvector>=0.4.2",
 ]
 
 [dependency-groups]
