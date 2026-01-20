@@ -25,8 +25,8 @@ Most RAG projects rely on high-level wrappers like LangChain. This project inten
 ## Roadmap
 
 * [x] Initial Scaffolding
-* [-] Data Modeling (Current focus)
-* [ ] ArXiv PDF Parsers (Handling LaTeX/Math)
+* [x] Data Modeling (Current focus)
+* [ ] ArXiv PDF Parsers (Handling LaTeX/Math) (skipping for now)
 * [ ] Chunking & Embedding logic
 * [ ] Vector Search Implementation
 * [ ] Generation & Attribution
