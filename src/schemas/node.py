@@ -10,9 +10,6 @@ from src.schemas.protocols import ORMBaseNodeProtocol
 DEFAULT_TEXT_NODE_TMPL = "{metadata_str}\n\n{content}"
 DEFAULT_METADATA_TMPL = "{key}: {value}"
 
-TRUNCATE_LENGTH = 350
-WRAP_WIDTH = 70
-
 
 class BaseNode(BaseModel):
     """Pydantic model of a Base Node."""
