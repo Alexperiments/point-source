@@ -18,6 +18,7 @@ from src.core.security import hash_password
 from src.database.database import async_session_factory
 from src.db_models.user import User
 from src.schemas.user import UserCreate
+from src.services.doc_ingestion_service import DocumentIngestionService
 
 
 custom_theme = Theme(
@@ -40,6 +41,57 @@ app = typer.Typer(
 @app.callback()
 def main_callback() -> None:
     """Administrative CLI Entry Point."""
+
+
+@app.command()
+def ingest_documents(
+    batch_size: Annotated[
+        int,
+        typer.Option(help="Batch size for document ingestion"),
+    ] = 1000,
+    category: Annotated[
+        str | None,
+        typer.Option(help="Arxiv category to filter the request."),
+    ] = None,
+) -> None:
+    """Ingest documents from ar5iv dataset into the database."""
+    console.print(
+        Panel(
+            Align.center(
+                "[bold white]Document Ingestion Wizard[/bold white]",
+            ),
+            box=box.ROUNDED,
+            style="bold blue",
+            subtitle="Import ar5iv Papers",
+        ),
+    )
+
+    with console.status(
+        "[bold green]Ingesting ar5iv papers...[/bold green]",
+        spinner="dots",
+    ):
+        try:
+            count = asyncio.run(_ingest_documents(batch_size, category=category))
+            console.print(
+                Panel(
+                    f"Successfully ingested [bold]{count}[/] documents!",
+                    title="Success",
+                    style="success",
+                ),
+            )
+        except Exception as e:
+            console.print(f"[bold red]Critical Error:[/bold red] {e}")
+            raise typer.Exit(1) from e
+
+
+async def _ingest_documents(batch_size: int, category: str | None = None) -> int:
+    """Ingest documents into the database."""
+    async with async_session_factory() as session:
+        service = DocumentIngestionService(session)
+        return await service.ingest_ar5iv_papers(
+            batch_size=batch_size,
+            category=category,
+        )
 
 
 @app.command()
