@@ -6,8 +6,8 @@ from collections.abc import AsyncGenerator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.ext.asyncio.session import AsyncSession
-from sqlalchemy.ext.declarative import DeclarativeMeta, declarative_base
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.ext.declarative import DeclarativeMeta
+from sqlalchemy.orm import DeclarativeBase, declarative_base
 
 from src.core.config import settings
 
@@ -16,14 +16,11 @@ class Base(DeclarativeBase):
     """Base class for all models."""
 
 
-class DeclarativeMetaBase(DeclarativeMeta, abc.ABCMeta):
-    """DeclarativeBase class that works as base for abstract classes."""
+class DeclarativeMetaBase(DeclarativeMeta, abc.ABC):
+    """Metaclass that combines SQLAlchemy declarative behavior with ABC."""
 
 
-class AbstractBase(declarative_base(metaclass=DeclarativeMetaBase)):
-    """Abstract base class for all models."""
-
-    __abstract__ = True
+AbstractBase = declarative_base(metaclass=DeclarativeMetaBase)
 
 
 engine = create_async_engine(
