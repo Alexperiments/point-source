@@ -50,7 +50,7 @@ class BaseNode(AbstractBase):
         return cls(**pydantic_model.model_dump())
 
     def __repr__(self) -> str:
-        return f"<node_id={self.id} text={self.text.strip()} node_metadata={self.node_metadata}>"
+        return f"<node_id={self.id} text={self.text.strip()[:50]} node_metadata={self.node_metadata}>"
 
 
 class TextNode(BaseNode):
@@ -81,14 +81,14 @@ class TextNode(BaseNode):
     source_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("documents.id"),
-        nullable=False,
+        nullable=True,
         default=None,
     )
 
     parent_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("document_chunks.id"),
-        nullable=False,
+        nullable=True,
         default=None,
     )
 
@@ -146,7 +146,10 @@ class DocumentNode(BaseNode):
 
     __tablename__: str = "documents"
 
-    children: Mapped[list["TextNode"]] = relationship(back_populates="source")
+    children: Mapped[list["TextNode"]] = relationship(
+        back_populates="source",
+        cascade="all, delete-orphan",
+    )
 
     @property
     def children_ids(self) -> list[uuid.UUID]:
