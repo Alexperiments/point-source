@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 
 from src.core.security import hash_password
 from src.database.database import async_session_factory
-from src.models.user import User
+from src.db_models.user import User
 from src.schemas.user import UserCreate
 
 

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
 from src.core.security import create_access_token, oauth2_scheme
-from src.models.user import User
+from src.db_models.user import User
 from src.schemas.user import Token, UserCreate, UserLogin
 from src.services.user_service import (
     UserService,

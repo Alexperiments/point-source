@@ -9,7 +9,7 @@ from starlette_admin.contrib.sqla import ModelView
 from starlette_admin.exceptions import FormValidationError
 
 from src.core.security import hash_password
-from src.models.user import User
+from src.db_models.user import User
 from src.schemas.user import UserCreate, UserUpdate
 
 

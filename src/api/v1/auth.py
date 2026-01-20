@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import oauth2_scheme
 from src.database.database import get_async_session
-from src.models.user import User
+from src.db_models.user import User
 from src.schemas.user import (
     Token,
     TokenValidationResponse,

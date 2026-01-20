@@ -5,7 +5,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import hash_password
-from src.models.user import User
+from src.db_models.user import User
 
 
 @pytest.mark.asyncio

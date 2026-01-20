@@ -7,7 +7,7 @@ from src.core.agentic_system.agents.main_agent import (
     MainAgentDependencies,
     main_agent,
 )
-from src.models.user import User
+from src.db_models.user import User
 
 
 class LLMServiceError(Exception):

@@ -22,7 +22,7 @@ from src.database.database import Base
 
 
 if TYPE_CHECKING:
-    from src.models.user import User
+    from src.db_models.user import User
 
 
 class Prompt(Base):

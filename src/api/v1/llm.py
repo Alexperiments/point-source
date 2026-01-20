@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.v1.auth import get_current_user
 from src.database.database import get_async_session
 from src.database.redis import get_redis_pool
-from src.models.user import User
+from src.db_models.user import User
 from src.schemas.llm import LLMRequest, LLMResponse
 from src.services.llm_service import LLMService, LLMServiceError
 
