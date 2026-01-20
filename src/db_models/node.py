@@ -146,6 +146,8 @@ class DocumentNode(BaseNode):
 
     __tablename__: str = "documents"
 
+    provider_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+
     children: Mapped[list["TextNode"]] = relationship(
         back_populates="source",
         cascade="all, delete-orphan",
