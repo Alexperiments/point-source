@@ -142,6 +142,7 @@ class Settings(BaseSettings):
             username=self.database_user,
             password=self.database_password.get_secret_value(),
             host=self.database_host,
+            port=self.database_port,
             path=self.database_name,
         )
 

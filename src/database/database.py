@@ -7,20 +7,23 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.ext.asyncio.session import AsyncSession
 from sqlalchemy.ext.declarative import DeclarativeMeta
-from sqlalchemy.orm import DeclarativeBase, declarative_base
+from sqlalchemy.orm import declarative_base
 
 from src.core.config import settings
-
-
-class Base(DeclarativeBase):
-    """Base class for all models."""
 
 
 class DeclarativeMetaBase(DeclarativeMeta, abc.ABC):
     """Metaclass that combines SQLAlchemy declarative behavior with ABC."""
 
 
-AbstractBase = declarative_base(metaclass=DeclarativeMetaBase)
+# Create ONE metadata object
+Base = declarative_base()
+
+# Second base shares the SAME metadata
+AbstractBase = declarative_base(
+    metadata=Base.metadata,
+    metaclass=DeclarativeMetaBase,
+)
 
 
 engine = create_async_engine(

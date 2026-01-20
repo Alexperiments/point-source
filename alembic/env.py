@@ -1,6 +1,6 @@
 import asyncio
 from sqlalchemy.ext.asyncio import create_async_engine
-import src.models
+import src.db_models
 from alembic import context
 from src.core.config import settings
 from src.database.database import Base
