@@ -57,8 +57,8 @@ class TextNodeRead(BaseNodeRead):
     max_char_size: int
     start_char_index: int
     end_char_index: int
-    source_id: uuid.UUID
-    parent_id: uuid.UUID
+    source_id: uuid.UUID | None = None
+    parent_id: uuid.UUID | None = None
     children_ids: list[uuid.UUID] | None = None
     prev_id: uuid.UUID | None = None
     next_id: uuid.UUID | None = None
