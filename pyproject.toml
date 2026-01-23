@@ -23,6 +23,7 @@ dependencies = [
     "typer>=0.20.0",
     "pgvector>=0.4.2",
     "datasets>=4.5.0",
+    "logfire[sqlalchemy]>=4.19.0",
 ]
 
 [dependency-groups]
