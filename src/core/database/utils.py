@@ -16,11 +16,10 @@ async def insert_many(
 ) -> int:
     """Insert many in the table referenced by the provided SQLAlchemy table object.
 
-    Return the number of inserted rows.
+    Return the number of inserted rows. Caller manages the transaction.
     """
     result = await session.execute(
         insert(table).on_conflict_do_nothing().returning(literal(1)),
         values,
     )
-    await session.commit()
     return sum(1 for _ in result)

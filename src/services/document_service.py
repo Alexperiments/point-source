@@ -37,7 +37,7 @@ class DocumentService:
 
     @logfire.instrument(
         "document_ingestion_service",
-        extract_args=["batch_size", "base_metadata"],
+        extract_args=["batch_size", "metadata"],
     )
     async def ingest_document(
         self,
@@ -49,7 +49,7 @@ class DocumentService:
         async for batch in async_itertools.batched(rows, batch_size):
             validated_batch = await self._validate_batch_with_metadata(
                 batch=batch,
-                base_metadata=metadata,
+                metadata=metadata,
             )
             await self._ingest_batch(batch=validated_batch)
 
@@ -59,11 +59,11 @@ class DocumentService:
     async def _validate_batch_with_metadata(
         self,
         batch: Sequence[dict],
-        base_metadata: dict | None = None,
+        metadata: dict | None = None,
     ) -> list[dict]:
         validated_models = DocumentNodeBatchAdapter.validate_python(
             batch,
-            context={"base_metadata": base_metadata},
+            context={"base_metadata": metadata},
         )
 
         validated_documents_metric.add(len(validated_models))

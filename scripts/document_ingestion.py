@@ -47,6 +47,7 @@ async def main() -> None:
                 batch_size=1000,
                 metadata={"source": dataset_name, "category": category},
             )
+            await session.commit()
 
         logfire.info(
             "Document ingestion job finished",
