@@ -12,7 +12,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.database.database import AbstractBase
+from src.core.database.base import AbstractBase
 from src.schemas.protocols import PydanticBaseModelProtocol
 
 
@@ -146,7 +146,7 @@ class DocumentNode(BaseNode):
 
     __tablename__: str = "documents"
 
-    provider_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    source_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
 
     children: Mapped[list["TextNode"]] = relationship(
         back_populates="source",

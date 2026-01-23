@@ -1,14 +1,30 @@
 """Node structure definition and mapping to database."""
 
 import uuid
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict
-
-from src.schemas.protocols import ORMBaseNodeProtocol
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 
 DEFAULT_TEXT_NODE_TMPL = "{metadata_str}\n\n{content}"
 DEFAULT_METADATA_TMPL = "{key}: {value}"
+
+
+def is_positive(value: int) -> int:
+    """Utility function for pydantic validators."""
+    if value < 0:
+        raise ValueError(f"{value} is not a positive number")
+    return value
+
+
+PositiveInteger = Annotated[int, AfterValidator(is_positive)]
 
 
 class BaseNode(BaseModel):
@@ -28,32 +44,58 @@ class BaseNode(BaseModel):
 class BaseNodeCreate(BaseNode):
     """Pydantic model for a base node input."""
 
+    @field_validator("node_metadata", mode="before")
+    @classmethod
+    def apply_default_metadata(cls, v: dict, info: ValidationInfo) -> dict:
+        """Merge base_metadata from validation context into node_metadata.
+
+        - context["base_metadata"] comes from validate_python(..., context=...)
+        - user-provided node_metadata wins over base_metadata on key conflicts
+        """
+        base = (info.context or {}).get("base_metadata") or {}
+        return {**base, **v}
+
 
 class BaseNodeRead(BaseNode):
     """Pydantic model for a base node output."""
 
     id: uuid.UUID
 
-    @classmethod
-    def from_orm_model(cls, orm_model: ORMBaseNodeProtocol) -> "BaseNode":
-        """Validate a SQLAlchemy ORM model for a BaseNode."""
-        return cls.model_validate(orm_model)
-
 
 class TextNodeCreate(BaseNodeCreate):
     """Text node create validation model."""
 
-    max_char_size: int
-    start_char_index: int
-    end_char_index: int
+    max_length: PositiveInteger
+    start_index: PositiveInteger
+    end_index: PositiveInteger
+
+    @model_validator(mode="after")
+    def check_text_length(self) -> "TextNodeCreate":
+        """After validator to check text length."""
+        if len(self.text) > self.max_length:
+            raise ValueError(f"text is longer than max_length: {self.max_length}")
+        if len(self.text) != (self.end_index - self.start_index):
+            raise ValueError(
+                f"text length ({len(self.text)}) is different from the length implied by the indexes ({self.end_index - self.start_index})",
+            )
+        return self
+
+    @model_validator(mode="after")
+    def check_start_end_consistency(self) -> "TextNodeCreate":
+        """After validator to check that end_index >= start_index."""
+        if self.end_index < self.start_index:
+            raise ValueError(
+                f"end_index is smaller than start_index ({self.end_index} < {self.start_index}).",
+            )
+        return self
 
 
 class TextNodeRead(BaseNodeRead):
     """Text node read validation model."""
 
-    max_char_size: int
-    start_char_index: int
-    end_char_index: int
+    max_char_size: PositiveInteger
+    start_char_index: PositiveInteger
+    end_char_index: PositiveInteger
     source_id: uuid.UUID | None = None
     parent_id: uuid.UUID | None = None
     children_ids: list[uuid.UUID] | None = None
@@ -64,10 +106,13 @@ class TextNodeRead(BaseNodeRead):
 class DocumentNodeCreate(BaseNodeCreate):
     """Document node create validation model."""
 
+    source_id: str
+
 
 class DocumentNodeRead(BaseNodeRead):
     """Document node read validation model."""
 
+    source_id: str
     children_ids: list[uuid.UUID] | None = None
 
 
