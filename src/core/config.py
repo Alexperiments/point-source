@@ -45,7 +45,7 @@ def load_project_info() -> ProjectInfo:
     project_info: ProjectInfo = {
         "name": project.get(
             "name",
-            "pydantic-ai-production-ready-template",
+            "point-source",
         ),
         "version": project.get("version", "0.1.0"),
         "description": project.get(
@@ -90,11 +90,11 @@ class Settings(BaseSettings):
     )
     jwt_algorithm: str = Field(default="HS256")
     jwt_issuer: str = Field(
-        default="pydantic-ai-production-ready-template",
+        default="point-source",
         description="JWT issuer claim (iss) - identifies who issued the token",
     )
     jwt_audience: str = Field(
-        default="pydantic-ai-production-ready-template",
+        default="point-source",
         description=("JWT audience claim (aud) - identifies the intended recipient"),
     )
     clock_skew_leeway_seconds: int = Field(
