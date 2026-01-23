@@ -18,11 +18,11 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
-from src.database.database import Base
+from src.core.database.base import Base
 
 
 if TYPE_CHECKING:
-    from src.db_models.user import User
+    from src.models.user import User
 
 
 class Prompt(Base):

@@ -4,8 +4,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.db_models.node import BaseNode, DocumentNode, TextNode
-from src.database.database import AbstractBase
+from src.models.node import BaseNode, DocumentNode, TextNode
+from src.core.database.base import AbstractBase
 
 
 # ============================================================================

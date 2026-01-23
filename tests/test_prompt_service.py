@@ -9,7 +9,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db_models.prompt import Prompt, PromptVersion
+from src.models.prompt import Prompt, PromptVersion
 from src.services.prompt_service import (
     PromptNotFoundError,
     PromptService,

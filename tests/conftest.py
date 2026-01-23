@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from src.database.database import Base, get_async_session
+from src.core.database.base import Base, get_async_session
 from src.main import app
 
 

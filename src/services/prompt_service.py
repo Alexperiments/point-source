@@ -4,10 +4,10 @@ import uuid
 
 from redis.asyncio import Redis
 from sqlalchemy import func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.database.database import AsyncSession
-from src.db_models.prompt import Prompt, PromptVersion
+from src.models.prompt import Prompt, PromptVersion
 
 
 class PromptServiceError(Exception):

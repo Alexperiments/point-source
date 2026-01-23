@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.cli import _create_superuser
 from src.core.security import hash_password, verify_password
-from src.db_models.user import User
+from src.models.user import User
 
 
 @pytest.mark.asyncio

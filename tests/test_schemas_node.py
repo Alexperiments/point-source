@@ -135,7 +135,7 @@ class TestBaseNodeRead:
                 self.node_metadata = {"key": "value"}
 
         orm_model = MockORMModel()
-        node = BaseNodeRead.from_orm_model(orm_model)
+        node = BaseNodeRead.model_validate(orm_model)
         assert node.id == orm_model.id # pyright: ignore[reportAttributeAccessIssue]
         assert node.text == orm_model.text
         assert node.embedding == orm_model.embedding
@@ -149,14 +149,14 @@ class TestTextNodeCreate:
         """Test creating TextNodeCreate with required fields."""
         node = TextNodeCreate(
             text="Sample text",
-            max_char_size=100,
-            start_char_index=0,
-            end_char_index=11
+            max_length=100,
+            start_index=0,
+            end_index=11
         )
         assert node.text == "Sample text"
-        assert node.max_char_size == 100
-        assert node.start_char_index == 0
-        assert node.end_char_index == 11
+        assert node.max_length == 100
+        assert node.start_index == 0
+        assert node.end_index == 11
 
     def test_text_node_create_missing_char_fields_raises_error(self):
         """Test that missing char fields raises validation error."""
@@ -167,22 +167,22 @@ class TestTextNodeCreate:
         """Test TextNodeCreate accepts negative indices."""
         node = TextNodeCreate(
             text="Sample text",
-            max_char_size=100,
-            start_char_index=-5,
-            end_char_index=5
+            max_length=100,
+            start_index=-5,
+            end_index=5
         )
-        assert node.start_char_index == -5
-        assert node.end_char_index == 5
+        assert node.start_index == -5
+        assert node.end_index == 5
 
     def test_text_node_create_zero_max_char_size(self):
         """Test TextNodeCreate accepts zero max_char_size."""
         node = TextNodeCreate(
             text="",
-            max_char_size=0,
-            start_char_index=0,
-            end_char_index=0
+            max_length=0,
+            start_index=0,
+            end_index=0
         )
-        assert node.max_char_size == 0
+        assert node.max_length == 0
 
 
 class TestTextNodeRead:
@@ -507,11 +507,11 @@ class TestEdgeCases:
         """Test TextNodeCreate accepts logically invalid index ordering."""
         node = TextNodeCreate(
             text="text",
-            max_char_size=100,
-            start_char_index=50,
-            end_char_index=10
+            max_length=100,
+            start_index=50,
+            end_index=10
         )
-        assert node.start_char_index > node.end_char_index
+        assert node.start_index > node.end_index
 
     def test_duplicate_uuids_in_children_ids(self):
         """Test nodes accept duplicate UUIDs in children_ids."""
