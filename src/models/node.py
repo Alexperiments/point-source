@@ -10,7 +10,7 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, foreign, mapped_column, relationship
 
 from src.core.database.base import AbstractBase
 from src.schemas.protocols import PydanticBaseModelProtocol
@@ -126,8 +126,8 @@ class TextNode(BaseNode):
     next_node: Mapped["TextNode | None"] = relationship(
         "TextNode",
         back_populates="prev_node",
-        foreign_keys=[prev_id],
         uselist=False,
+        primaryjoin=lambda: TextNode.id == foreign(TextNode.prev_id),
     )
 
     @property
