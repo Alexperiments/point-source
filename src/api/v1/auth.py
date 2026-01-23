@@ -5,9 +5,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.database.base import get_async_session
 from src.core.security import oauth2_scheme
-from src.database.database import get_async_session
-from src.db_models.user import User
+from src.models.user import User
 from src.schemas.user import (
     Token,
     TokenValidationResponse,

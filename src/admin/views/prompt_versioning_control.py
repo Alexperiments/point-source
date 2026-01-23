@@ -7,8 +7,8 @@ from starlette.responses import RedirectResponse, Response
 from starlette.templating import Jinja2Templates
 from starlette_admin import CustomView
 
-from src.database.database import async_session_factory
-from src.database.redis import get_redis_pool
+from src.core.database.base import async_session_factory
+from src.core.database.redis import get_redis_pool
 from src.services.prompt_service import PromptService
 
 

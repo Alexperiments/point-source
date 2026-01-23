@@ -16,9 +16,9 @@ from starlette_admin.contrib.sqla import Admin
 from starlette_admin.exceptions import FormValidationError, LoginFailed
 
 from src.admin.views import EnvSettingsView, PromptManagerView, UsersView
+from src.core.database.base import async_session_factory, engine
 from src.core.security import verify_password
-from src.database.database import async_session_factory, engine
-from src.db_models import User
+from src.models import User
 
 
 TEMPLATES_DIR = "templates"
