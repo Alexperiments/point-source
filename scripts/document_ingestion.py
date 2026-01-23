@@ -32,7 +32,7 @@ async def main() -> None:
                 split="train",
                 streaming=True,
             )
-            .filter(lambda row: "astro-ph" in row["id"])
+            .filter(lambda row: category in row["id"])
             .remove_columns(["source", "format"])
             .rename_column("id", "source_id")
         )

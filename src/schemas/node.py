@@ -8,7 +8,6 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     ValidationInfo,
-    field_validator,
     model_validator,
 )
 
@@ -44,16 +43,27 @@ class BaseNode(BaseModel):
 class BaseNodeCreate(BaseNode):
     """Pydantic model for a base node input."""
 
-    @field_validator("node_metadata", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def apply_default_metadata(cls, v: dict, info: ValidationInfo) -> dict:
+    def apply_default_metadata(cls, data: object, info: ValidationInfo) -> object:
         """Merge base_metadata from validation context into node_metadata.
 
         - context["base_metadata"] comes from validate_python(..., context=...)
         - user-provided node_metadata wins over base_metadata on key conflicts
         """
-        base = (info.context or {}).get("base_metadata") or {}
-        return {**base, **v}
+        if not isinstance(data, dict):
+            return data
+
+        base_metadata = (info.context or {}).get("base_metadata") or {}
+        if not base_metadata:
+            return data
+
+        node_metadata = data.get("node_metadata")
+        if node_metadata is None:
+            data["node_metadata"] = base_metadata
+        else:
+            data["node_metadata"] = {**base_metadata, **node_metadata}
+        return data
 
 
 class BaseNodeRead(BaseNode):
