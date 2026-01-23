@@ -64,7 +64,6 @@ async def async_session() -> AsyncIterator:
     async with async_session_factory() as session:
         try:
             yield session
-            await session.commit()
         except SQLAlchemyError:
             await session.rollback()
             raise

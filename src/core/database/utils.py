@@ -22,5 +22,5 @@ async def insert_many(
         insert(table).on_conflict_do_nothing().returning(literal(1)),
         values,
     )
-    await session.flush()
+    await session.commit()
     return sum(1 for _ in result)
