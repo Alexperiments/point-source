@@ -1,161 +1,78 @@
 """Document ingestion service."""
 
+import itertools
+from collections.abc import AsyncIterable, Iterable, Sequence
+
 import logfire
-from datasets import load_dataset
-from sqlalchemy.exc import IntegrityError
+from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db_models.node import DocumentNode
+from src.core.database.utils import insert_many
+from src.models.node import DocumentNode
+from src.schemas.node import DocumentNodeCreate
 
 
-papers_processed_metric = logfire.metric_counter("papers_processed")
-documents_ingested_metric = logfire.metric_counter("documents_ingested")
+DocumentNodeBatchAdapter = TypeAdapter(list[DocumentNodeCreate])
 
 
-class DocumentIngestionServiceError(Exception):
-    """Exception for document ingestion service errors."""
-
-
-class DocumentAlreadyExistsError(DocumentIngestionServiceError):
-    """Exception for document already exists errors."""
-
-
-class FailedToCreateDocumentError(DocumentIngestionServiceError):
-    """Exception for failed to create document errors."""
+validated_documents_metric = logfire.metric_counter(
+    "papers_processed",
+    unit="1",
+    description="Number of valide papers fetched.",
+)
+ingested_documents_metric = logfire.metric_counter(
+    "documents_ingested",
+    unit="1",
+    description="Number of papers inserted in the database.",
+)
 
 
 class DocumentIngestionService:
     """Service for document ingestion operations."""
 
-    def __init__(self, session: AsyncSession) -> None:
-        """Initialize the document ingestion service.
-
-        Args:
-            session: The database session to use.
-
-        """
-        self.session = session
-
-    async def ingest_ar5iv_papers(
+    def __init__(
         self,
+        session: AsyncSession,
         batch_size: int = 1000,
-        category: str | None = None,
-    ) -> int:
-        """Ingest ar5iv papers from the dataset, filtering by category in id.
+        metadata: dict | None = None,
+    ) -> None:
+        """Initialize the document ingestion service."""
+        self.session = session
+        self.batch_size = batch_size
+        self.base_metadata = metadata
 
-        Args:
-            batch_size: Number of documents to process in each batch.
-            category: Arxiv category to filter the request, e.g. 'astro-ph'.
+    async def ingest(self, rows: Iterable[dict] | AsyncIterable[dict]) -> None:
+        """Ingest all the documents from an iterable, after pydantic validation following DocumentNode model."""
+        with logfire.span("documents_ingestion"):
+            if isinstance(rows, Iterable) and not isinstance(rows, AsyncIterable):
+                iterator = iter(rows)
+                for batch in itertools.batched(iterable=iterator, n=self.batch_size):
+                    await self._ingest_batch(batch)
+            else:
+                batch: list[dict] = []
+                async for row in rows:
+                    batch.append(row)
+                    if len(batch) >= self.batch_size:
+                        await self._ingest_batch(batch)
+                        batch = []
+                if batch:
+                    await self._ingest_batch(batch)
 
-        Returns:
-            The number of documents ingested.
+    async def _ingest_batch(self, batch: Sequence[dict]) -> None:
+        """Ingest a batch of documents."""
+        validated_models = DocumentNodeBatchAdapter.validate_python(
+            batch,
+            context={"base_metadata": self.base_metadata},
+        )
 
-        """
-        with logfire.span(
-            "ingest_ar5iv_papers",
-            batch_size=batch_size,
-            category=category,
-        ):
-            logfire.log(
-                "info",
-                "Starting ingestion of astro-ph papers from ar5iv dataset",
-            )
-            # Load dataset in streaming mode
-            dataset = load_dataset(
-                "marin-community/ar5iv-no-problem-markdown",
-                split="train",
-                streaming=True,
-            )
-            logfire.log("info", "Dataset loaded in streaming mode")
-            if category is not None:
-                dataset = dataset.filter(lambda row: category in row["id"])
-                logfire.log("info", f"Applied filter for category: {category}")
+        validated_documents_metric.add(len(validated_models))
 
-            batch = []
-            count = 0
-            processed = 0
-            logfire.log(
-                "info",
-                f"Starting to process papers with batch_size={batch_size}",
-            )
+        validated_inputs = [model.model_dump() for model in validated_models]
 
-            for paper in dataset:
-                ar5iv_id = paper.get("id")
-                if not ar5iv_id:
-                    continue
+        inserted_rows_count = await insert_many(
+            self.session,
+            DocumentNode,
+            validated_inputs,
+        )
 
-                processed += 1
-                if processed % 10 == 0:
-                    logfire.log("info", f"Processed {processed} papers")
-
-                document = DocumentNode(
-                    provider_id=ar5iv_id,
-                    text=paper.get("markdown", ""),
-                    node_metadata={
-                        "source": "ar5iv",
-                        "category": "astro-ph",
-                    },
-                )
-                batch.append(document)
-
-                if len(batch) >= batch_size:
-                    logfire.log("info", f"Inserting batch of {len(batch)} documents")
-                    inserted = await self._insert_batch(batch)
-                    count += inserted
-                    batch = []
-                    logfire.log(
-                        "info",
-                        f"Inserted batch of {inserted} documents, total: {count}",
-                    )
-
-            if batch:
-                logfire.log("info", f"Inserting final batch of {len(batch)} documents")
-                inserted = await self._insert_batch(batch)
-                count += inserted
-                logfire.log(
-                    "info",
-                    f"Inserted final batch of {inserted} documents, total: {count}",
-                )
-
-            logfire.log(
-                "info",
-                f"Ingestion completed successfully, total papers processed: {processed}, total documents: {count}",
-            )
-            papers_processed_metric.add(processed)
-            documents_ingested_metric.add(count)
-            return count
-
-    async def _insert_batch(self, documents: list[DocumentNode]) -> int:
-        """Insert a batch of documents into the database, skipping duplicates.
-
-        Args:
-            documents: List of DocumentNode instances to insert.
-
-        Returns:
-            Number of documents successfully inserted.
-
-        Raises:
-            FailedToCreateDocumentError: If insertion fails for reasons other than duplicates.
-
-        """
-        with logfire.span("_insert_batch", batch_size=len(documents)):
-            inserted_count = 0
-            for doc in documents:
-                self.session.add(doc)
-                try:
-                    await self.session.flush()
-                    inserted_count += 1
-                except IntegrityError:
-                    await self.session.rollback()
-                    logfire.log(
-                        "warning",
-                        f"Skipped duplicate document with provider_id: {doc.provider_id}",
-                    )
-                except Exception as e:
-                    await self.session.rollback()
-                    msg = f"Failed to insert document {doc.provider_id}: {e!s}"
-                    logfire.exception(msg)
-                    raise FailedToCreateDocumentError(msg) from e
-
-            await self.session.commit()
-            return inserted_count
+        ingested_documents_metric.add(inserted_rows_count)
