@@ -48,6 +48,9 @@ docker-dev-logs: ## View development Docker services logs
 docker-dev-restart: ## Restart development Docker services
 	docker-compose --env-file .env.development -f docker-compose.dev.yml restart
 
+docker-dev-pause: ## Pause development Docker services
+	docker-compose --env-file .env.development -f docker-compose.dev.yml stop
+
 docker-up: ## Start production Docker services
 	docker-compose -f docker-compose.yml up -d
 
