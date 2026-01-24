@@ -1,5 +1,6 @@
 """Document ingestion service."""
 
+import uuid
 from collections.abc import AsyncIterable, Iterable, Sequence
 
 import logfire
@@ -83,3 +84,12 @@ class DocumentService:
         )
 
         ingested_documents_metric.add(inserted_rows_count)
+
+    @logging.auto_instrument()
+    async def chunk_documents(
+        self,
+        document_ids: Sequence[uuid.UUID],
+        *,
+        metadata: dict | None = None,
+    ) -> None:
+        """Chunk the documents pointed by the provided UUIDs."""
