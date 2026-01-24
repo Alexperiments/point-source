@@ -163,6 +163,7 @@ venv.bak/
 
 # Generated files
 pgadmin/provisioning/servers.json
+.data/
 
 # Spyder project settings
 .spyderproject
