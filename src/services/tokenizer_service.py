@@ -129,21 +129,13 @@ class TokenizerFactory:
     - OpenAI / Anthropic / Google: explicitly not implemented (raises NotImplementedError).
     """
 
-    _CACHE: dict[str, Tokenizer] = {}
-
     @staticmethod
     def create(model_name: str) -> Tokenizer:
-        """Return a cached tokenizer instance based on the inferred provider."""
-        cache_key = (model_name or "").strip()
-        if cache_key in TokenizerFactory._CACHE:
-            return TokenizerFactory._CACHE[cache_key]
-
+        """Return a tokenizer instance based on the inferred provider."""
         provider = TokenizerFactory._infer_provider(model_name)
 
         if provider == TokenizerProvider.HUGGINGFACE:
-            tokenizer = HuggingFaceTokenizer(model_name=model_name)
-            TokenizerFactory._CACHE[cache_key] = tokenizer
-            return tokenizer
+            return HuggingFaceTokenizer(model_name=model_name)
 
         if provider in (
             TokenizerProvider.OPENAI,

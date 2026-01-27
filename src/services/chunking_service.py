@@ -5,9 +5,18 @@ from __future__ import annotations
 import re  # noqa: TC003
 from dataclasses import dataclass
 
+import logfire
+
 from src.core.chunking_config import CHUNKING_SETTINGS
 from src.models.node import DocumentNode, TextNode
-from src.services.tokenizer_service import Tokenizer, TokenizerFactory, TokenOffsets
+from src.services.tokenizer_service import TokenizerFactory, TokenOffsets
+
+
+chunked_documents_metric = logfire.metric_counter(
+    "documents_chunked",
+    unit="1",
+    description="Number of documents chunked.",
+)
 
 
 @dataclass(frozen=True)
@@ -36,12 +45,6 @@ class _SectionTrail:
     level: int
     node: TextNode
     path: str
-
-
-@dataclass(frozen=True)
-class _ChunkInternalResult:
-    documents: list[DocumentNode]
-    nodes: list[TextNode]
 
 
 # -----------------------------
@@ -127,12 +130,18 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
             return [text[span_start:span_end]]
 
         equation_spans = self._collect_equation_spans(text, span_start, span_end)
+        block_equation_spans = self._collect_block_equation_spans(
+            text,
+            span_start,
+            span_end,
+        )
         units = self._build_units(
             token_offsets=token_offsets,
             text=text,
             span_start=span_start,
             span_end=span_end,
             equation_spans=equation_spans,
+            block_equation_spans=block_equation_spans,
             max_tokens=max_tokens,
         )
 
@@ -155,6 +164,7 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
         span_start: int,
         span_end: int,
         equation_spans: list[_SpanRange],
+        block_equation_spans: list[_SpanRange],
         max_tokens: int,
     ) -> list[_SpanUnit]:
         units: list[_SpanUnit] = []
@@ -163,6 +173,7 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
             span_start=span_start,
             span_end=span_end,
             equation_spans=equation_spans,
+            block_equation_spans=block_equation_spans,
         )
 
         for paragraph in paragraph_spans:
@@ -209,6 +220,7 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
         span_start: int,
         span_end: int,
         equation_spans: list[_SpanRange],
+        block_equation_spans: list[_SpanRange],
     ) -> list[_SpanRange]:
         spans: list[_SpanRange] = []
         cursor = span_start
@@ -220,6 +232,15 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
             if self._is_inside_equation(sep_start, equation_spans) or (
                 sep_end - 1 >= span_start
                 and self._is_inside_equation(sep_end - 1, equation_spans)
+            ):
+                continue
+            if self._should_merge_paragraph_break(
+                text=text,
+                sep_start=sep_start,
+                sep_end=sep_end,
+                span_start=span_start,
+                span_end=span_end,
+                block_equation_spans=block_equation_spans,
             ):
                 continue
 
@@ -252,6 +273,9 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
                 boundary - 1 >= para_start
                 and self._is_inside_equation(boundary - 1, equation_spans)
             ):
+                continue
+            next_idx = self._find_next_nonspace(text, boundary, para_end)
+            if next_idx is not None and self._looks_like_continuation(text, next_idx):
                 continue
             boundaries.append(boundary)
 
@@ -300,9 +324,94 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
         merged.append(_SpanRange(current_start, current_end))
         return merged
 
+    def _collect_block_equation_spans(
+        self,
+        text: str,
+        span_start: int,
+        span_end: int,
+    ) -> list[_SpanRange]:
+        matches = [
+            _SpanRange(match.start(), match.end())
+            for match in self._block_math_pattern.finditer(text, span_start, span_end)
+        ]
+        if not matches:
+            return []
+
+        matches.sort(key=lambda span: span.start)
+        merged: list[_SpanRange] = []
+        current_start = matches[0].start
+        current_end = matches[0].end
+        for span in matches[1:]:
+            if span.start <= current_end:
+                current_end = max(current_end, span.end)
+            else:
+                merged.append(_SpanRange(current_start, current_end))
+                current_start = span.start
+                current_end = span.end
+        merged.append(_SpanRange(current_start, current_end))
+        return merged
+
     @staticmethod
     def _is_inside_equation(position: int, spans: list[_SpanRange]) -> bool:
         return any(span.start <= position < span.end for span in spans)
+
+    @staticmethod
+    def _find_prev_nonspace(text: str, start: int, lower_bound: int) -> int | None:
+        index = min(start, len(text) - 1)
+        while index >= lower_bound:
+            if not text[index].isspace():
+                return index
+            index -= 1
+        return None
+
+    @staticmethod
+    def _find_next_nonspace(text: str, start: int, upper_bound: int) -> int | None:
+        index = max(start, 0)
+        while index < upper_bound:
+            if not text[index].isspace():
+                return index
+            index += 1
+        return None
+
+    @classmethod
+    def _looks_like_sentence_end(cls, text: str, index: int) -> bool:
+        cursor = index
+        while cursor >= 0 and text[cursor].isspace():
+            cursor -= 1
+        while cursor >= 0 and text[cursor] in "\"')]}":
+            cursor -= 1
+        return cursor >= 0 and text[cursor] in ".!?"
+
+    @classmethod
+    def _looks_like_continuation(cls, text: str, index: int) -> bool:
+        char = text[index]
+        if char.islower() or char.isdigit():
+            return True
+        return char in "([{"
+
+    def _should_merge_paragraph_break(
+        self,
+        *,
+        text: str,
+        sep_start: int,
+        sep_end: int,
+        span_start: int,
+        span_end: int,
+        block_equation_spans: list[_SpanRange],
+    ) -> bool:
+        prev_idx = self._find_prev_nonspace(text, sep_start - 1, span_start)
+        next_idx = self._find_next_nonspace(text, sep_end, span_end)
+        if prev_idx is None or next_idx is None:
+            return False
+
+        prev_inside_block = self._is_inside_equation(prev_idx, block_equation_spans)
+        next_inside_block = self._is_inside_equation(next_idx, block_equation_spans)
+        if not (prev_inside_block or next_inside_block):
+            return False
+
+        prev_sentence_end = self._looks_like_sentence_end(text, prev_idx)
+        next_continuation = self._looks_like_continuation(text, next_idx)
+        return (not prev_sentence_end) or next_continuation
 
     @staticmethod
     def _token_count(
@@ -371,15 +480,7 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
 
 
 class MarkdownChunker:
-    """THE markdown chunker.
-
-    Goals:
-    - Single tokenizer call for the full text (for providers that support offsets).
-    - Fast span->token lookups (bisect on precomputed starts/ends).
-    - Clear separation of concerns: parsing vs. tree-building vs. splitting.
-    - Extensible provider support via TokenizerFactory.
-    - Extensible splitting via ChunkingStrategy.
-    """
+    """Main markdown chunker service."""
 
     def __init__(
         self,
@@ -398,63 +499,31 @@ class MarkdownChunker:
 
         self._strategy = strategy or ParagraphEquationSentenceChunkingStrategy()
 
-        self._token_offsets_cache: TokenOffsets | None = None
-        self._token_offsets_text: str | None = None
-        self._tokenizer_instance: Tokenizer | None = None
+        self._tokenizer = TokenizerFactory.create(self._tokenizer_name)
 
-    def chunk(self, documents: list[DocumentNode]) -> list[DocumentNode]:
-        """Chunk documents into TextNode trees rooted at each DocumentNode.
-
-        Behavior (kept consistent with the existing implementation):
-        - Detect headings using configured regex.
-        - Section text is content between a heading line and the next heading.
-        - If a section exceeds max_tokens, create "part N" child nodes, clear parent text.
-        - If no headings exist, create a single root TextNode containing the whole text
-          (and apply splitting if it exceeds max_tokens).
-        - Returns the input documents; relationships are set on ORM objects.
-        """
-        result = self._chunk_internal(documents)
-        return result.documents
-
-    def chunk_nodes(self, documents: list[DocumentNode]) -> list[TextNode]:
-        """Chunk documents and return the created TextNodes."""
-        result = self._chunk_internal(documents)
-        return result.nodes
+    @logfire.instrument(
+        "document_chunking_service",
+        extract_args=["documents"],
+    )
+    def chunk(self, documents: list[DocumentNode]) -> None:
+        """Chunk documents into TextNode trees rooted at each DocumentNode."""
+        self._chunk_internal(documents)
+        chunked_documents_metric.add(len(documents))
+        logfire.info("documents_chunking completed")
 
     def _chunk_internal(
         self,
         documents: list[DocumentNode],
-    ) -> _ChunkInternalResult:
-        nodes: list[TextNode] = []
+    ) -> None:
         for document in documents:
             markdown_text = document.text
-            token_offsets = self._get_or_build_token_offsets(markdown_text)
+            token_offsets = self._tokenizer.tokenize_with_offsets(
+                markdown_text,
+            )
             headings = self._extract_headings(markdown_text)
 
             if not headings:
-                root = TextNode(text="")
-                root.document = document
-                root.node_metadata = {
-                    **(root.node_metadata or {}),
-                    "title": "Document",
-                    "path": "Document",
-                }
-                nodes.append(root)
-
-                span = self._trim_whitespace_span(
-                    markdown_text,
-                    0,
-                    len(markdown_text),
-                )
-                self._assign_or_split_section_text(
-                    node=root,
-                    full_text=markdown_text,
-                    span_start=span.start,
-                    span_end=span.end,
-                    token_offsets=token_offsets,
-                    nodes=nodes,
-                )
-                continue
+                raise ValueError(f"Headers not detected for document ID: {document.id}")
 
             stack: list[_SectionTrail] = []
 
@@ -480,14 +549,13 @@ class MarkdownChunker:
                 )
 
                 node = TextNode(text="")
-                node.document = document
                 node.parent = parent_node
+                node.document = document
                 node.node_metadata = {
                     **(node.node_metadata or {}),
                     "title": heading.title,
                     "path": path,
                 }
-                nodes.append(node)
 
                 self._assign_or_split_section_text(
                     node=node,
@@ -495,12 +563,10 @@ class MarkdownChunker:
                     span_start=section_span.start,
                     span_end=section_span.end,
                     token_offsets=token_offsets,
-                    nodes=nodes,
                 )
+                document.children.append(node)
 
                 stack.append(_SectionTrail(heading.level, node, path))
-
-        return _ChunkInternalResult(documents, nodes)
 
     # -------------------------
     # Parsing
@@ -526,26 +592,6 @@ class MarkdownChunker:
         return _SpanRange(start, end)
 
     # -------------------------
-    # Token offsets (single pass)
-    # -------------------------
-
-    def _get_or_build_token_offsets(self, text: str) -> TokenOffsets:
-        if self._token_offsets_text == text and self._token_offsets_cache is not None:
-            return self._token_offsets_cache
-
-        tokenizer = self._get_tokenizer()
-        offsets = tokenizer.tokenize_with_offsets(text)
-
-        self._token_offsets_text = text
-        self._token_offsets_cache = offsets
-        return offsets
-
-    def _get_tokenizer(self) -> Tokenizer:
-        if self._tokenizer_instance is None:
-            self._tokenizer_instance = TokenizerFactory.create(self._tokenizer_name)
-        return self._tokenizer_instance
-
-    # -------------------------
     # Section text assignment & splitting
     # -------------------------
 
@@ -557,7 +603,6 @@ class MarkdownChunker:
         span_start: int,
         span_end: int,
         token_offsets: TokenOffsets,
-        nodes: list[TextNode],
     ) -> None:
         """Assign section text to node, or split into part-N children if too large."""
         if span_start >= span_end:
@@ -588,16 +633,15 @@ class MarkdownChunker:
         )
 
         node.text = ""
-        nodes.extend(self._create_part_children(parent=node, chunks=chunks))
+        self._create_part_children(parent=node, chunks=chunks)
 
     @staticmethod
     def _create_part_children(
         *,
         parent: TextNode,
         chunks: list[str],
-    ) -> list[TextNode]:
+    ) -> None:
         prev_node: TextNode | None = None
-        children: list[TextNode] = []
 
         part_index = 0
         for chunk_text in chunks:
@@ -614,7 +658,6 @@ class MarkdownChunker:
                 else f"part {part_index}"
             )
             child = TextNode(text=chunk_text)
-            child.document = parent.document
             child.parent = parent
             child.node_metadata = {
                 **(child.node_metadata or {}),
@@ -625,5 +668,4 @@ class MarkdownChunker:
                 child.prev_node = prev_node
                 prev_node.next_node = child
             prev_node = child
-            children.append(child)
-        return children
+            parent.document.children.append(child)
