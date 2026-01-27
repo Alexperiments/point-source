@@ -3,7 +3,6 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-import logfire
 from fastapi import FastAPI
 from guard.middleware import SecurityMiddleware
 from guard.models import SecurityConfig
@@ -13,14 +12,6 @@ from starlette.middleware.sessions import SessionMiddleware
 from src.admin import admin
 from src.api import router
 from src.core.config import PROJECT_INFO, settings
-
-
-logfire.configure(
-    token=(
-        settings.logfire_token.get_secret_value() if settings.logfire_token else None
-    ),
-)
-logfire.instrument_pydantic_ai()
 
 
 @asynccontextmanager

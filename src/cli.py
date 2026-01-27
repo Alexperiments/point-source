@@ -3,7 +3,6 @@
 import asyncio
 from typing import Annotated
 
-import logfire
 import typer
 from pydantic import SecretStr, ValidationError
 from rich import box
@@ -19,9 +18,6 @@ from src.core.database.base import async_session_factory
 from src.core.security import hash_password
 from src.models.user import User
 from src.schemas.user import UserCreate
-
-
-logfire.configure()
 
 
 custom_theme = Theme(

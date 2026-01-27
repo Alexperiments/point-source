@@ -4,7 +4,6 @@ import abc
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 
-import logfire
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.ext.asyncio.session import AsyncSession
@@ -70,6 +69,3 @@ async def async_session() -> AsyncIterator:
         except Exception:
             await session.rollback()
             raise
-
-
-logfire.instrument_sqlalchemy(engine=engine)
