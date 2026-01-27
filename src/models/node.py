@@ -9,34 +9,53 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, foreign, mapped_column, relationship
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    MappedAsDataclass,
+    foreign,
+    mapped_column,
+    relationship,
+)
 
-from src.core.database.base import AbstractBase
+from src.core.database.base import Base
 
 
-class BaseNode(AbstractBase):
+class NodeBase(MappedAsDataclass, DeclarativeBase):
+    """Declarative base for dataclass-mapped node models."""
+
+    metadata = Base.metadata
+    __abstract__ = True
+    __dataclass_kwargs__ = {"kw_only": True}
+
+
+class BaseNode(NodeBase):
     """Abstract text node interface."""
 
     __abstract__ = True
+    __dataclass_kwargs__ = {"kw_only": True}
+
+    text: Mapped[str] = mapped_column(Text(), nullable=False)
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4,
+        default_factory=uuid.uuid4,
+        init=False,
     )
 
     embedding: Mapped[list[float] | None] = mapped_column(
         Vector(768),
         nullable=True,
         default=None,
+        init=False,
     )
-
-    text: Mapped[str] = mapped_column(Text(), nullable=False)
 
     node_metadata: Mapped[dict[str, object] | None] = mapped_column(
         JSON(),
         nullable=True,
         default=None,
+        init=False,
     )
 
     def __repr__(self) -> str:
@@ -50,16 +69,20 @@ class TextNode(BaseNode):
     """
 
     __tablename__: str = "document_chunks"
+    __dataclass_kwargs__ = {"kw_only": True}
 
-    document_id: Mapped[uuid.UUID] = mapped_column(
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("documents.id"),
         nullable=True,
         default=None,
     )
-    document: Mapped["DocumentNode"] = relationship(back_populates="children")
+    document: Mapped["DocumentNode"] = relationship(
+        back_populates="children",
+        init=False,
+    )
 
-    parent_id: Mapped[uuid.UUID] = mapped_column(
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("document_chunks.id"),
         nullable=True,
@@ -70,6 +93,7 @@ class TextNode(BaseNode):
         remote_side="TextNode.id",
         back_populates="children",
         foreign_keys=[parent_id],
+        init=False,
     )
 
     prev_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -83,6 +107,7 @@ class TextNode(BaseNode):
         remote_side="TextNode.id",
         back_populates="next_node",
         foreign_keys=[prev_id],
+        init=False,
     )
 
     next_node: Mapped["TextNode | None"] = relationship(
@@ -90,6 +115,7 @@ class TextNode(BaseNode):
         back_populates="prev_node",
         uselist=False,
         primaryjoin=lambda: TextNode.id == foreign(TextNode.prev_id),
+        init=False,
     )
 
     children: Mapped[list["TextNode"]] = relationship(
@@ -98,6 +124,7 @@ class TextNode(BaseNode):
         cascade="all, delete-orphan",
         foreign_keys=[parent_id],
         single_parent=True,
+        init=False,
     )
 
 
@@ -105,10 +132,12 @@ class DocumentNode(BaseNode):
     """Document node object."""
 
     __tablename__: str = "documents"
+    __dataclass_kwargs__ = {"kw_only": True}
 
     source_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
 
     children: Mapped[list["TextNode"]] = relationship(
         back_populates="document",
         cascade="all, delete-orphan",
+        init=False,
     )

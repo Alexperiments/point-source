@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import bisect
+from dataclasses import dataclass
 from enum import Enum
-from typing import NamedTuple, Unknown
+from typing import Any, NamedTuple
 
 from transformers import AutoTokenizer
 
@@ -23,6 +24,7 @@ class _TokenRange(NamedTuple):
     end: int
 
 
+@dataclass(frozen=True)
 class TokenOffsets:
     """Instances represent a mapping between token indices and char spans for a specific text.
 
@@ -104,7 +106,7 @@ class HuggingFaceTokenizer(Tokenizer):
         self._tokenizer = self._load_tokenizer(model_name)
 
     @staticmethod
-    def _load_tokenizer(model_name: str) -> Unknown:
+    def _load_tokenizer(model_name: str) -> Any:  # noqa: ANN401
         return AutoTokenizer.from_pretrained(model_name, use_fast=True)
 
     def tokenize_with_offsets(self, text: str) -> TokenOffsets:

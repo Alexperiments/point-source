@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import re  # noqa: TC003
-import time
-import uuid  # noqa: TC003
 from dataclasses import dataclass
-from typing import NamedTuple
 
 from src.core.chunking_config import CHUNKING_SETTINGS
-from src.schemas.node import TextNode
+from src.models.node import DocumentNode, TextNode
 from src.services.tokenizer_service import Tokenizer, TokenizerFactory, TokenOffsets
 
 
@@ -37,21 +34,14 @@ class _SpanUnit:
 @dataclass(frozen=True)
 class _SectionTrail:
     level: int
-    node_id: uuid.UUID
+    node: TextNode
     path: str
-
-
-class ChunkingProfileResult(NamedTuple):
-    """Result of chunking with profiling information."""
-
-    nodes: list[TextNode]
-    profile: dict[str, float]
 
 
 @dataclass(frozen=True)
 class _ChunkInternalResult:
+    documents: list[DocumentNode]
     nodes: list[TextNode]
-    profile: dict[str, float] | None
 
 
 # -----------------------------
@@ -412,120 +402,105 @@ class MarkdownChunker:
         self._token_offsets_text: str | None = None
         self._tokenizer_instance: Tokenizer | None = None
 
-    def chunk(self, markdown_text: str) -> list[TextNode]:
-        """Chunk a markdown document into a hierarchy of TextNodes.
+    def chunk(self, documents: list[DocumentNode]) -> list[DocumentNode]:
+        """Chunk documents into TextNode trees rooted at each DocumentNode.
 
         Behavior (kept consistent with the existing implementation):
         - Detect headings using configured regex.
-        - Build hierarchical paths "Parent/Child".
         - Section text is content between a heading line and the next heading.
         - If a section exceeds max_tokens, create "part N" child nodes, clear parent text.
-        - If no headings exist, create a single "Document" root node containing the whole text
+        - If no headings exist, create a single root TextNode containing the whole text
           (and apply splitting if it exceeds max_tokens).
-        - Returns a LIST of nodes (not a dict). Parent/child relationships are via uuid.UUID fields.
+        - Returns the input documents; relationships are set on ORM objects.
         """
-        result = self._chunk_internal(markdown_text, profile=None)
-        return result.nodes
+        result = self._chunk_internal(documents)
+        return result.documents
 
-    def chunk_with_profile(
-        self,
-        markdown_text: str,
-    ) -> ChunkingProfileResult:
-        """Chunk text and return nodes with a coarse timing breakdown."""
-        profile: dict[str, float] = {}
-        result = self._chunk_internal(markdown_text, profile=profile)
-        return ChunkingProfileResult(result.nodes, result.profile or {})
+    def chunk_nodes(self, documents: list[DocumentNode]) -> list[TextNode]:
+        """Chunk documents and return the created TextNodes."""
+        result = self._chunk_internal(documents)
+        return result.nodes
 
     def _chunk_internal(
         self,
-        markdown_text: str,
-        profile: dict[str, float] | None,
+        documents: list[DocumentNode],
     ) -> _ChunkInternalResult:
-        start_total = time.perf_counter()
+        nodes: list[TextNode] = []
+        for document in documents:
+            markdown_text = document.text
+            token_offsets = self._get_or_build_token_offsets(markdown_text)
+            headings = self._extract_headings(markdown_text)
 
-        def _record(name: str, start_time: float) -> None:
-            if profile is None:
-                return
-            profile[name] = profile.get(name, 0.0) + (time.perf_counter() - start_time)
+            if not headings:
+                root = TextNode(text="")
+                root.document = document
+                root.node_metadata = {
+                    **(root.node_metadata or {}),
+                    "title": "Document",
+                    "path": "Document",
+                }
+                nodes.append(root)
 
-        timer_start = time.perf_counter()
-        token_offsets = self._get_or_build_token_offsets(markdown_text)
-        _record("tokenize", timer_start)
+                span = self._trim_whitespace_span(
+                    markdown_text,
+                    0,
+                    len(markdown_text),
+                )
+                self._assign_or_split_section_text(
+                    node=root,
+                    full_text=markdown_text,
+                    span_start=span.start,
+                    span_end=span.end,
+                    token_offsets=token_offsets,
+                    nodes=nodes,
+                )
+                continue
 
-        timer_start = time.perf_counter()
-        headings = self._extract_headings(markdown_text)
-        _record("extract_headings", timer_start)
-        nodes_by_id: dict[uuid.UUID, TextNode] = {}
+            stack: list[_SectionTrail] = []
 
-        if not headings:
-            root = TextNode(title="Document", path="Document", text="", parent_id=None)
-            nodes_by_id[root.id] = root
+            for i, heading in enumerate(headings):
+                next_start = (
+                    headings[i + 1].start
+                    if i + 1 < len(headings)
+                    else len(markdown_text)
+                )
+                section_span = self._trim_whitespace_span(
+                    markdown_text,
+                    heading.end,
+                    next_start,
+                )
 
-            span = self._trim_whitespace_span(
-                markdown_text,
-                0,
-                len(markdown_text),
-            )
-            assign_start = time.perf_counter()
-            self._assign_or_split_section_text(
-                node=root,
-                full_text=markdown_text,
-                span_start=span.start,
-                span_end=span.end,
-                token_offsets=token_offsets,
-                nodes_by_id=nodes_by_id,
-            )
-            _record("assign_or_split", assign_start)
-            if profile is not None:
-                profile["total"] = time.perf_counter() - start_total
-            return _ChunkInternalResult(list(nodes_by_id.values()), profile)
+                while stack and stack[-1].level >= heading.level:
+                    stack.pop()
 
-        stack: list[_SectionTrail] = []
+                parent_node = stack[-1].node if stack else None
+                parent_path = stack[-1].path if stack else ""
+                path = (
+                    f"{parent_path}/{heading.title}" if parent_path else heading.title
+                )
 
-        for i, heading in enumerate(headings):
-            next_start = (
-                headings[i + 1].start if i + 1 < len(headings) else len(markdown_text)
-            )
-            section_span = self._trim_whitespace_span(
-                markdown_text,
-                heading.end,
-                next_start,
-            )
+                node = TextNode(text="")
+                node.document = document
+                node.parent = parent_node
+                node.node_metadata = {
+                    **(node.node_metadata or {}),
+                    "title": heading.title,
+                    "path": path,
+                }
+                nodes.append(node)
 
-            while stack and stack[-1].level >= heading.level:
-                stack.pop()
+                self._assign_or_split_section_text(
+                    node=node,
+                    full_text=markdown_text,
+                    span_start=section_span.start,
+                    span_end=section_span.end,
+                    token_offsets=token_offsets,
+                    nodes=nodes,
+                )
 
-            parent_id = stack[-1].node_id if stack else None
-            parent_path = stack[-1].path if stack else ""
-            path = f"{parent_path}/{heading.title}" if parent_path else heading.title
+                stack.append(_SectionTrail(heading.level, node, path))
 
-            node = TextNode(
-                title=heading.title,
-                path=path,
-                text="",
-                parent_id=parent_id,
-            )
-            nodes_by_id[node.id] = node
-
-            if parent_id is not None:
-                nodes_by_id[parent_id].children_ids.append(node.id)
-
-            assign_start = time.perf_counter()
-            self._assign_or_split_section_text(
-                node=node,
-                full_text=markdown_text,
-                span_start=section_span.start,
-                span_end=section_span.end,
-                token_offsets=token_offsets,
-                nodes_by_id=nodes_by_id,
-            )
-            _record("assign_or_split", assign_start)
-
-            stack.append(_SectionTrail(heading.level, node.id, path))
-
-        if profile is not None:
-            profile["total"] = time.perf_counter() - start_total
-        return _ChunkInternalResult(list(nodes_by_id.values()), profile)
+        return _ChunkInternalResult(documents, nodes)
 
     # -------------------------
     # Parsing
@@ -582,7 +557,7 @@ class MarkdownChunker:
         span_start: int,
         span_end: int,
         token_offsets: TokenOffsets,
-        nodes_by_id: dict[uuid.UUID, TextNode],
+        nodes: list[TextNode],
     ) -> None:
         """Assign section text to node, or split into part-N children if too large."""
         if span_start >= span_end:
@@ -613,16 +588,16 @@ class MarkdownChunker:
         )
 
         node.text = ""
-        self._create_part_children(parent=node, chunks=chunks, nodes_by_id=nodes_by_id)
+        nodes.extend(self._create_part_children(parent=node, chunks=chunks))
 
     @staticmethod
     def _create_part_children(
         *,
         parent: TextNode,
         chunks: list[str],
-        nodes_by_id: dict[uuid.UUID, TextNode],
-    ) -> None:
-        prev_id: uuid.UUID | None = None
+    ) -> list[TextNode]:
+        prev_node: TextNode | None = None
+        children: list[TextNode] = []
 
         part_index = 0
         for chunk_text in chunks:
@@ -630,17 +605,25 @@ class MarkdownChunker:
                 continue
 
             part_index += 1
-            title = f"part {part_index}"
-            child = TextNode(
-                title=title,
-                path=f"{parent.path}/{title}",
-                text=chunk_text,
-                parent_id=parent.id,
-                prev_id=prev_id,
+            parent_path = ""
+            if parent.node_metadata is not None:
+                parent_path = str(parent.node_metadata.get("path") or "")
+            path = (
+                f"{parent_path}/part {part_index}"
+                if parent_path
+                else f"part {part_index}"
             )
-            nodes_by_id[child.id] = child
-            parent.children_ids.append(child.id)
-
-            if prev_id is not None:
-                nodes_by_id[prev_id].next_id = child.id
-            prev_id = child.id
+            child = TextNode(text=chunk_text)
+            child.document = parent.document
+            child.parent = parent
+            child.node_metadata = {
+                **(child.node_metadata or {}),
+                "title": f"part {part_index}",
+                "path": path,
+            }
+            if prev_node is not None:
+                child.prev_node = prev_node
+                prev_node.next_node = child
+            prev_node = child
+            children.append(child)
+        return children

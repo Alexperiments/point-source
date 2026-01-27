@@ -6,12 +6,14 @@ from collections.abc import AsyncIterable, Iterable, Sequence
 import logfire
 from aioitertools import itertools as async_itertools
 from pydantic import TypeAdapter
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core import logging
 from src.core.database.utils import insert_many
-from src.models.node import DocumentNode
+from src.models.node import DocumentNode, TextNode
 from src.schemas.node import DocumentNodeCreate
+from src.services.chunking_service import MarkdownChunker
 
 
 DocumentNodeBatchAdapter = TypeAdapter(list[DocumentNodeCreate])
@@ -32,9 +34,15 @@ ingested_documents_metric = logfire.metric_counter(
 class DocumentService:
     """Service for document operations."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        chunker: MarkdownChunker | None = None,
+    ) -> None:
         """Initialize the document ingestion service."""
         self.session = session
+        self.chunker = chunker or MarkdownChunker()
 
     @logfire.instrument(
         "document_ingestion_service",
@@ -93,3 +101,28 @@ class DocumentService:
         metadata: dict | None = None,
     ) -> None:
         """Chunk the documents pointed by the provided UUIDs."""
+        if not document_ids:
+            return
+
+        await self.session.execute(
+            delete(TextNode).where(TextNode.document_id.in_(document_ids)),
+        )
+
+        result = await self.session.execute(
+            select(DocumentNode).where(DocumentNode.id.in_(document_ids)),
+        )
+        documents = list(result.scalars().all())
+        if not documents:
+            return
+
+        if metadata:
+            for document in documents:
+                document.node_metadata = {
+                    **(document.node_metadata or {}),
+                    **metadata,
+                }
+
+        new_nodes = self.chunker.chunk_nodes(documents)
+
+        if new_nodes:
+            self.session.add_all(new_nodes)
