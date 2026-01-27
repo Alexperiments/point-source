@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re  # noqa: TC003
+from collections.abc import Sequence  # noqa: TC003
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -521,7 +522,7 @@ class MarkdownChunker:
         "document_chunking_service",
         extract_args=["documents"],
     )
-    def chunk(self, documents: list[DocumentNode]) -> None:
+    def chunk(self, documents: Sequence[DocumentNode]) -> None:
         """Chunk documents into TextNode trees rooted at each DocumentNode."""
         self._chunk_internal(documents)
         chunked_documents_metric.add(len(documents))
@@ -529,7 +530,7 @@ class MarkdownChunker:
 
     def _chunk_internal(
         self,
-        documents: list[DocumentNode],
+        documents: Sequence[DocumentNode],
     ) -> None:
         """Build section nodes for each document based on headings."""
         for document in documents:
@@ -544,7 +545,7 @@ class MarkdownChunker:
 
             for heading, next_heading in zip(
                 headings,
-                headings[1:] + [None],
+                [*headings[1:], None],
                 strict=False,
             ):
                 next_start = (

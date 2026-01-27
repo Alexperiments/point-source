@@ -95,8 +95,9 @@ class DocumentService:
     async def chunk_documents(
         self,
         documents: Sequence[DocumentNode],
+        batch_size: int = 1000,
     ) -> None:
         """Chunk the documents pointed by the provided UUIDs."""
-        self.chunker.chunk(list(documents))
-
-        await self.session.commit()
+        async for batch in async_itertools.batched(documents, batch_size):
+            self.chunker.chunk(batch)
+            await self.session.commit()
