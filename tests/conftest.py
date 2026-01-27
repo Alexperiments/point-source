@@ -17,27 +17,35 @@ from src.main import app
 # Use in-memory SQLite for testing
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
-test_engine = create_async_engine(
-    TEST_DATABASE_URL,
-    echo=False,
-    future=True,
-)
 
-TestAsyncSessionLocal = async_sessionmaker(
-    bind=test_engine,
-    class_=AsyncSession,
-    autoflush=False,
-    expire_on_commit=False,
-)
+@pytest_asyncio.fixture(scope="session")
+async def test_engine() -> AsyncGenerator:
+    """Create a test engine and dispose it at session end."""
+    engine = create_async_engine(
+        TEST_DATABASE_URL,
+        echo=False,
+        future=True,
+    )
+    yield engine
+    await engine.dispose()
 
 
 @pytest_asyncio.fixture(scope="function")
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
+async def db_session(
+    test_engine,
+) -> AsyncGenerator[AsyncSession, None]:
     """Create a test database session."""
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    async with TestAsyncSessionLocal() as session:
+    session_factory = async_sessionmaker(
+        bind=test_engine,
+        class_=AsyncSession,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+
+    async with session_factory() as session:
         yield session
         await session.rollback()
 

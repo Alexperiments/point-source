@@ -217,8 +217,9 @@ async def test_create_superuser_integrity_error_handling() -> None:
     # Mock session to raise IntegrityError
     with patch("src.cli.async_session_factory") as mock_factory:
         mock_session = AsyncMock(spec=AsyncSession)
-        mock_session.execute = AsyncMock()
-        mock_session.execute.return_value.scalar_one_or_none.return_value = None
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_session.execute = AsyncMock(return_value=mock_result)
         mock_session.commit = AsyncMock(
             side_effect=IntegrityError(None, None, Exception("Mock"))
         )
