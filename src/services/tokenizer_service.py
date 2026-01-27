@@ -1,8 +1,8 @@
-"""Tokenizer service."""
+"""Tokenizer utilities for efficient offset-aware chunking."""
 
 from __future__ import annotations
 
-import bisect
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, NamedTuple
@@ -10,8 +10,11 @@ from typing import Any, NamedTuple
 from transformers import AutoTokenizer
 
 
+Offset = tuple[int, int]
+
+
 class TokenizerProvider(str, Enum):
-    """Enumeration of embedding providers."""
+    """Enumeration of tokenizer backends."""
 
     HUGGINGFACE = "huggingface"
     OPENAI = "openai"
@@ -19,50 +22,45 @@ class TokenizerProvider(str, Enum):
     GOOGLE = "google"
 
 
-class _TokenRange(NamedTuple):
+class _TokenSpan(NamedTuple):
+    """Half-open token span [start, end)."""
+
     start: int
     end: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TokenOffsets:
-    """Instances represent a mapping between token indices and char spans for a specific text.
+    """Token-to-character offsets for a specific text.
 
-    offsets[i] = (char_start, char_end) for token i
-    starts/ends are cached for fast bisect span->token range.
+    offsets[i] = (char_start, char_end) for token i.
+    starts/ends are cached for fast bisect span->token span lookup.
     """
 
     text: str
-    offsets: list[tuple[int, int]]
+    offsets: list[Offset]
     starts: list[int]
     ends: list[int]
 
     @classmethod
-    def from_offsets(cls, text: str, offsets: list[tuple[int, int]]) -> TokenOffsets:
-        """Build TokenOffsets with cached start/end arrays for fast span lookup."""
+    def from_offsets(cls, text: str, offsets: list[Offset]) -> TokenOffsets:
+        """Build TokenOffsets with cached start/end arrays for fast lookup."""
         return cls(
             text=text,
             offsets=offsets,
-            starts=[s for s, _ in offsets],
-            ends=[e for _, e in offsets],
+            starts=[start for start, _ in offsets],
+            ends=[end for _, end in offsets],
         )
 
-    def token_range_for_char_span(
-        self,
-        span_start: int,
-        span_end: int,
-    ) -> _TokenRange:
-        """Return [start_token, end_token) that overlaps the char span.
-
-        Uses precomputed ends/starts for O(log n) lookup.
-        """
+    def token_range_for_char_span(self, span_start: int, span_end: int) -> _TokenSpan:
+        """Return the token span [start, end) overlapping the char span."""
         if span_start >= span_end or not self.offsets:
-            return _TokenRange(0, 0)
+            return _TokenSpan(0, 0)
 
-        start_token = bisect.bisect_right(self.ends, span_start)
-        end_token = bisect.bisect_left(self.starts, span_end)
+        start_token = bisect_right(self.ends, span_start)
+        end_token = bisect_left(self.starts, span_end)
         end_token = max(end_token, start_token)
-        return _TokenRange(start_token, end_token)
+        return _TokenSpan(start_token, end_token)
 
     def slice_text_by_token_range(
         self,
@@ -71,10 +69,7 @@ class TokenOffsets:
         clamp_start: int,
         clamp_end: int,
     ) -> str:
-        """Convert a token span into a char slice, clamped to [clamp_start, clamp_end).
-
-        This is the critical primitive enabling single-pass tokenization plus fast chunk slicing.
-        """
+        """Convert a token span into a clamped character slice."""
         if start_token >= end_token or not self.offsets:
             return ""
 
@@ -86,7 +81,7 @@ class TokenOffsets:
 
 
 class Tokenizer:
-    """Interface for providers that can produce token offset mappings in a single call."""
+    """Interface for tokenizers that can return offset mappings."""
 
     provider: TokenizerProvider
 
@@ -96,7 +91,7 @@ class Tokenizer:
 
 
 class HuggingFaceTokenizer(Tokenizer):
-    """Tokenizer implementation backed by a Hugging Face fast tokenizer."""
+    """Tokenizer backed by a Hugging Face fast tokenizer."""
 
     provider = TokenizerProvider.HUGGINGFACE
 
@@ -107,10 +102,11 @@ class HuggingFaceTokenizer(Tokenizer):
 
     @staticmethod
     def _load_tokenizer(model_name: str) -> Any:  # noqa: ANN401
+        """Load a fast Hugging Face tokenizer for the given model name."""
         return AutoTokenizer.from_pretrained(model_name, use_fast=True)
 
     def tokenize_with_offsets(self, text: str) -> TokenOffsets:
-        """Tokenize text and return offset mappings from the HF tokenizer."""
+        """Tokenize text and return HF offset mappings."""
         encoded = self._tokenizer(
             text,
             return_offsets_mapping=True,
@@ -121,8 +117,14 @@ class HuggingFaceTokenizer(Tokenizer):
         return TokenOffsets.from_offsets(text=text, offsets=offsets)
 
 
+_NON_HF_PREFIXES = ("openai:", "anthropic:", "google:")
+_OPENAI_PREFIXES = ("openai:", "text-embedding-", "gpt-")
+_ANTHROPIC_PREFIXES = ("anthropic:", "claude-")
+_GOOGLE_PREFIXES = ("google:", "textembedding-", "gemini-")
+
+
 class TokenizerFactory:
-    """Centralized resolution of tokenizer provider based on model identifier.
+    """Centralized tokenizer selection based on a model identifier.
 
     Current behavior:
     - HuggingFace: implemented.
@@ -131,42 +133,39 @@ class TokenizerFactory:
 
     @staticmethod
     def create(model_name: str) -> Tokenizer:
-        """Return a tokenizer instance based on the inferred provider."""
+        """Return a tokenizer instance for the inferred provider."""
         provider = TokenizerFactory._infer_provider(model_name)
 
-        if provider == TokenizerProvider.HUGGINGFACE:
-            return HuggingFaceTokenizer(model_name=model_name)
-
-        if provider in (
-            TokenizerProvider.OPENAI,
-            TokenizerProvider.ANTHROPIC,
-            TokenizerProvider.GOOGLE,
-        ):
-            raise NotImplementedError(
-                f"Tokenizer provider '{provider.value}' is not implemented yet for model '{model_name}'.",
-            )
-
-        raise ValueError(f"Unsupported tokenizer provider for model '{model_name}'.")
+        match provider:
+            case TokenizerProvider.HUGGINGFACE:
+                return HuggingFaceTokenizer(model_name=model_name)
+            case (
+                TokenizerProvider.OPENAI
+                | TokenizerProvider.ANTHROPIC
+                | TokenizerProvider.GOOGLE
+            ):
+                raise NotImplementedError(
+                    f"Tokenizer provider '{provider.value}' is not implemented yet for model '{model_name}'.",
+                )
+            case _:
+                raise ValueError(
+                    f"Unsupported tokenizer provider for model '{model_name}'.",
+                )
 
     @staticmethod
     def _infer_provider(model_name: str) -> TokenizerProvider:
-        """Heuristics are intentionally explicit and easy to evolve.
-
-        You can replace this with a more formal model registry later.
-        """
+        """Infer the tokenizer provider using explicit, easy-to-evolve heuristics."""
         name = (model_name or "").strip()
+        lower = name.lower()
 
-        if "/" in name and not name.lower().startswith(
-            ("openai:", "anthropic:", "google:"),
-        ):
+        if "/" in name and not lower.startswith(_NON_HF_PREFIXES):
             return TokenizerProvider.HUGGINGFACE
 
-        lower = name.lower()
-        if lower.startswith(("openai:", "text-embedding-", "gpt-")):
+        if lower.startswith(_OPENAI_PREFIXES):
             return TokenizerProvider.OPENAI
-        if lower.startswith(("anthropic:", "claude-")):
+        if lower.startswith(_ANTHROPIC_PREFIXES):
             return TokenizerProvider.ANTHROPIC
-        if lower.startswith(("google:", "textembedding-", "gemini-")):
+        if lower.startswith(_GOOGLE_PREFIXES):
             return TokenizerProvider.GOOGLE
 
         # Default to HF only if it looks like HF; otherwise treat as OpenAI-like for safety

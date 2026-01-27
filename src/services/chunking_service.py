@@ -1,9 +1,10 @@
-"""Chunking service."""
+"""Markdown chunking service."""
 
 from __future__ import annotations
 
 import re  # noqa: TC003
 from dataclasses import dataclass
+from typing import Protocol
 
 import logfire
 
@@ -19,45 +20,44 @@ chunked_documents_metric = logfire.metric_counter(
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _Heading:
+    """Parsed markdown heading with level, title, and char span."""
+
     level: int
     title: str
     start: int
     end: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _SpanRange:
+    """Half-open character span [start, end)."""
+
     start: int
     end: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _SpanUnit:
+    """Span plus token count, used for window packing."""
+
     start: int
     end: int
     tokens: int
 
 
-@dataclass(frozen=True)
-class _SectionTrail:
+@dataclass(frozen=True, slots=True)
+class _SectionStackEntry:
+    """Stack entry tracking the active heading path and node."""
+
     level: int
     node: TextNode
     path: str
 
 
-# -----------------------------
-# Chunking strategy
-# -----------------------------
-
-
-class ChunkingStrategy:
-    """Base class for chunking strategies.
-
-    This ecapsulates a naive chunking strategy only based on token-window split.
-    Reimplement split_oversized_span to improve the strategy.
-    """
+class ChunkingStrategy(Protocol):
+    """Strategy for splitting oversized spans into chunkable text."""
 
     def split_oversized_span(
         self,
@@ -67,40 +67,17 @@ class ChunkingStrategy:
         max_tokens: int,
         overlap_tokens: int,
     ) -> list[str]:
-        """Naive token-window split. Designed as a stable seam for later "smart" chunking.
-
-        - Uses global offsets (single tokenizer call).
-        - Produces chunks <= max_tokens tokens each.
-        - Optional overlap (currently applied; set overlap_tokens=0 to disable).
-        """
-        token_range = token_offsets.token_range_for_char_span(
-            span_start,
-            span_end,
-        )
-        if token_range.start >= token_range.end:
-            return [token_offsets.text[span_start:span_end]]
-
-        chunks: list[str] = []
-        cursor = token_range.start
-        stride = max(1, max_tokens - max(0, overlap_tokens))
-
-        while cursor < token_range.end:
-            end_token = min(cursor + max_tokens, token_range.end)
-            piece = token_offsets.slice_text_by_token_range(
-                start_token=cursor,
-                end_token=end_token,
-                clamp_start=span_start,
-                clamp_end=span_end,
-            )
-            if piece:
-                chunks.append(piece)
-            cursor += stride
-
-        return chunks
+        """Split a span into chunks that honor token limits and overlap."""
+        ...
 
 
-class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
-    """Chunk by paragraphs; fall back to sentences; never split equations."""
+# -----------------------------
+# Chunking strategy
+# -----------------------------
+
+
+class ParagraphSentenceMathChunkingStrategy:
+    """Chunk by paragraph, fall back to sentences, and keep math intact."""
 
     def __init__(
         self,
@@ -110,7 +87,7 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
         inline_math_pattern: re.Pattern = CHUNKING_SETTINGS.inline_latex_math_patterns,
         block_math_pattern: re.Pattern = CHUNKING_SETTINGS.block_latex_math_patterns,
     ) -> None:
-        """Initialize the strategy with paragraph, sentence, and math patterns."""
+        """Store regex patterns for paragraph breaks, sentences, and math blocks."""
         self._paragraph_break_pattern = paragraph_break_pattern
         self._sentence_boundary_pattern = sentence_boundary_pattern
         self._inline_math_pattern = inline_math_pattern
@@ -124,28 +101,27 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
         max_tokens: int,
         overlap_tokens: int,
     ) -> list[str]:
-        """Split a span without breaking equations, preferring paragraph boundaries."""
+        """Split a large span by paragraph/sentence boundaries without cutting math."""
         text = token_offsets.text
         if span_start >= span_end:
             return [text[span_start:span_end]]
 
-        equation_spans = self._collect_equation_spans(text, span_start, span_end)
-        block_equation_spans = self._collect_block_equation_spans(
+        math_spans, block_math_spans = self._collect_math_span_sets(
             text,
             span_start,
             span_end,
         )
-        units = self._build_units(
+        units = self._build_split_units(
             token_offsets=token_offsets,
             text=text,
             span_start=span_start,
             span_end=span_end,
-            equation_spans=equation_spans,
-            block_equation_spans=block_equation_spans,
+            math_spans=math_spans,
+            block_math_spans=block_math_spans,
             max_tokens=max_tokens,
         )
 
-        chunk_spans = self._pack_units(
+        chunk_spans = self._pack_units_into_windows(
             units=units,
             max_tokens=max_tokens,
             overlap_tokens=overlap_tokens,
@@ -156,28 +132,29 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
         ]
         return chunks or [text[span_start:span_end]]
 
-    def _build_units(
+    def _build_split_units(
         self,
         *,
         token_offsets: TokenOffsets,
         text: str,
         span_start: int,
         span_end: int,
-        equation_spans: list[_SpanRange],
-        block_equation_spans: list[_SpanRange],
+        math_spans: list[_SpanRange],
+        block_math_spans: list[_SpanRange],
         max_tokens: int,
     ) -> list[_SpanUnit]:
+        """Build paragraph/sentence units with cached token counts."""
         units: list[_SpanUnit] = []
-        paragraph_spans = self._split_paragraphs(
+        paragraph_spans = self._split_paragraph_spans(
             text=text,
             span_start=span_start,
             span_end=span_end,
-            equation_spans=equation_spans,
-            block_equation_spans=block_equation_spans,
+            math_spans=math_spans,
+            block_math_spans=block_math_spans,
         )
 
         for paragraph in paragraph_spans:
-            if not text[paragraph.start : paragraph.end].strip():
+            if self._is_blank_span(text, paragraph):
                 continue
             para_tokens = self._token_count(
                 token_offsets,
@@ -188,18 +165,18 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
                 units.append(_SpanUnit(paragraph.start, paragraph.end, para_tokens))
                 continue
 
-            sentence_spans = self._split_sentences(
+            sentence_spans = self._split_sentence_spans(
                 text=text,
                 para_start=paragraph.start,
                 para_end=paragraph.end,
-                equation_spans=equation_spans,
+                math_spans=math_spans,
             )
             if len(sentence_spans) <= 1:
                 units.append(_SpanUnit(paragraph.start, paragraph.end, para_tokens))
                 continue
 
             for sentence in sentence_spans:
-                if not text[sentence.start : sentence.end].strip():
+                if self._is_blank_span(text, sentence):
                     continue
                 sent_tokens = self._token_count(
                     token_offsets,
@@ -213,15 +190,16 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
             units.append(_SpanUnit(span_start, span_end, total_tokens))
         return units
 
-    def _split_paragraphs(
+    def _split_paragraph_spans(
         self,
         *,
         text: str,
         span_start: int,
         span_end: int,
-        equation_spans: list[_SpanRange],
-        block_equation_spans: list[_SpanRange],
+        math_spans: list[_SpanRange],
+        block_math_spans: list[_SpanRange],
     ) -> list[_SpanRange]:
+        """Split into paragraph spans, skipping math and glued block math."""
         spans: list[_SpanRange] = []
         cursor = span_start
 
@@ -229,18 +207,20 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
             sep_start, sep_end = match.start(), match.end()
             if sep_start <= cursor:
                 continue
-            if self._is_inside_equation(sep_start, equation_spans) or (
-                sep_end - 1 >= span_start
-                and self._is_inside_equation(sep_end - 1, equation_spans)
+            if self._boundary_hits_span(
+                start=sep_start,
+                end=sep_end,
+                lower_bound=span_start,
+                spans=math_spans,
             ):
                 continue
-            if self._should_merge_paragraph_break(
+            if self._should_skip_paragraph_split(
                 text=text,
                 sep_start=sep_start,
                 sep_end=sep_end,
                 span_start=span_start,
                 span_end=span_end,
-                block_equation_spans=block_equation_spans,
+                block_math_spans=block_math_spans,
             ):
                 continue
 
@@ -252,14 +232,15 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
 
         return spans
 
-    def _split_sentences(
+    def _split_sentence_spans(
         self,
         *,
         text: str,
         para_start: int,
         para_end: int,
-        equation_spans: list[_SpanRange],
+        math_spans: list[_SpanRange],
     ) -> list[_SpanRange]:
+        """Split a paragraph into sentence spans, avoiding math interiors."""
         boundaries: list[int] = []
         for match in self._sentence_boundary_pattern.finditer(
             text,
@@ -269,13 +250,15 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
             boundary = match.end()
             if boundary <= para_start or boundary >= para_end:
                 continue
-            if self._is_inside_equation(match.start(), equation_spans) or (
-                boundary - 1 >= para_start
-                and self._is_inside_equation(boundary - 1, equation_spans)
+            if self._boundary_hits_span(
+                start=match.start(),
+                end=boundary,
+                lower_bound=para_start,
+                spans=math_spans,
             ):
                 continue
             next_idx = self._find_next_nonspace(text, boundary, para_end)
-            if next_idx is not None and self._looks_like_continuation(text, next_idx):
+            if next_idx is not None and self._is_sentence_continuation(text, next_idx):
                 continue
             boundaries.append(boundary)
 
@@ -291,72 +274,88 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
             spans.append(_SpanRange(cursor, para_end))
         return spans
 
-    def _collect_equation_spans(
+    def _collect_math_span_sets(
         self,
         text: str,
         span_start: int,
         span_end: int,
-    ) -> list[_SpanRange]:
-        raw_spans: list[_SpanRange] = []
-        patterns = [self._block_math_pattern, self._inline_math_pattern]
-        for pattern in patterns:
-            matches = [
-                _SpanRange(match.start(), match.end())
-                for match in pattern.finditer(text, span_start, span_end)
-            ]
-            raw_spans.extend(matches)
-
-        if not raw_spans:
-            return []
-
-        raw_spans.sort(key=lambda span: span.start)
-        merged: list[_SpanRange] = []
-        current_span = raw_spans[0]
-        current_start = current_span.start
-        current_end = current_span.end
-        for span in raw_spans[1:]:
-            if span.start <= current_end:
-                current_end = max(current_end, span.end)
-            else:
-                merged.append(_SpanRange(current_start, current_end))
-                current_start = span.start
-                current_end = span.end
-        merged.append(_SpanRange(current_start, current_end))
-        return merged
-
-    def _collect_block_equation_spans(
-        self,
-        text: str,
-        span_start: int,
-        span_end: int,
-    ) -> list[_SpanRange]:
-        matches = [
-            _SpanRange(match.start(), match.end())
-            for match in self._block_math_pattern.finditer(text, span_start, span_end)
-        ]
-        if not matches:
-            return []
-
-        matches.sort(key=lambda span: span.start)
-        merged: list[_SpanRange] = []
-        current_start = matches[0].start
-        current_end = matches[0].end
-        for span in matches[1:]:
-            if span.start <= current_end:
-                current_end = max(current_end, span.end)
-            else:
-                merged.append(_SpanRange(current_start, current_end))
-                current_start = span.start
-                current_end = span.end
-        merged.append(_SpanRange(current_start, current_end))
-        return merged
+    ) -> tuple[list[_SpanRange], list[_SpanRange]]:
+        """Return merged spans for all math and for block math only."""
+        block_spans = self._collect_pattern_spans(
+            text=text,
+            span_start=span_start,
+            span_end=span_end,
+            patterns=[self._block_math_pattern],
+        )
+        inline_spans = self._collect_pattern_spans(
+            text=text,
+            span_start=span_start,
+            span_end=span_end,
+            patterns=[self._inline_math_pattern],
+        )
+        block_math_spans = self._merge_overlapping_spans(block_spans)
+        math_spans = self._merge_overlapping_spans([*block_spans, *inline_spans])
+        return math_spans, block_math_spans
 
     @staticmethod
-    def _is_inside_equation(position: int, spans: list[_SpanRange]) -> bool:
-        return any(span.start <= position < span.end for span in spans)
+    def _collect_pattern_spans(
+        *,
+        text: str,
+        span_start: int,
+        span_end: int,
+        patterns: list[re.Pattern],
+    ) -> list[_SpanRange]:
+        """Collect raw spans for the provided regex patterns."""
+        return [
+            _SpanRange(match.start(), match.end())
+            for pattern in patterns
+            for match in pattern.finditer(text, span_start, span_end)
+        ]
+
+    @staticmethod
+    def _merge_overlapping_spans(spans: list[_SpanRange]) -> list[_SpanRange]:
+        """Merge overlapping spans into a sorted, non-overlapping list."""
+        if not spans:
+            return []
+
+        spans = sorted(spans, key=lambda span: span.start)
+        merged: list[_SpanRange] = []
+        current_start = spans[0].start
+        current_end = spans[0].end
+        for span in spans[1:]:
+            if span.start <= current_end:
+                current_end = max(current_end, span.end)
+            else:
+                merged.append(_SpanRange(current_start, current_end))
+                current_start = span.start
+                current_end = span.end
+        merged.append(_SpanRange(current_start, current_end))
+        return merged
+
+    @classmethod
+    def _boundary_hits_span(
+        cls,
+        *,
+        start: int,
+        end: int,
+        lower_bound: int,
+        spans: list[_SpanRange],
+    ) -> bool:
+        """Return True if a boundary intersects any span."""
+        if not spans:
+            return False
+        end_check = end - 1
+        has_end_check = end_check >= lower_bound
+        for span in spans:
+            if span.start <= start < span.end:
+                return True
+            if has_end_check and span.start <= end_check < span.end:
+                return True
+        return False
 
     @staticmethod
     def _find_prev_nonspace(text: str, start: int, lower_bound: int) -> int | None:
+        """Return the previous non-space character index."""
         index = min(start, len(text) - 1)
         while index >= lower_bound:
             if not text[index].isspace():
@@ -366,6 +365,7 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
 
     @staticmethod
     def _find_next_nonspace(text: str, start: int, upper_bound: int) -> int | None:
+        """Return the next non-space character index."""
         index = max(start, 0)
         while index < upper_bound:
             if not text[index].isspace():
@@ -374,7 +374,8 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
         return None
 
     @classmethod
-    def _looks_like_sentence_end(cls, text: str, index: int) -> bool:
+    def _is_sentence_end(cls, text: str, index: int) -> bool:
+        """Heuristic: trailing punctuation (ignoring quotes/brackets) ends a sentence."""
         cursor = index
         while cursor >= 0 and text[cursor].isspace():
             cursor -= 1
@@ -383,13 +384,14 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
         return cursor >= 0 and text[cursor] in ".!?"
 
     @classmethod
-    def _looks_like_continuation(cls, text: str, index: int) -> bool:
+    def _is_sentence_continuation(cls, text: str, index: int) -> bool:
+        """Heuristic: lowercase/digit/leading bracket implies continuation."""
         char = text[index]
         if char.islower() or char.isdigit():
             return True
         return char in "([{"
 
-    def _should_merge_paragraph_break(
+    def _should_skip_paragraph_split(
         self,
         *,
         text: str,
@@ -397,20 +399,31 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
         sep_end: int,
         span_start: int,
         span_end: int,
-        block_equation_spans: list[_SpanRange],
+        block_math_spans: list[_SpanRange],
     ) -> bool:
+        """Skip splitting when block math borders a continuing sentence."""
         prev_idx = self._find_prev_nonspace(text, sep_start - 1, span_start)
         next_idx = self._find_next_nonspace(text, sep_end, span_end)
         if prev_idx is None or next_idx is None:
             return False
 
-        prev_inside_block = self._is_inside_equation(prev_idx, block_equation_spans)
-        next_inside_block = self._is_inside_equation(next_idx, block_equation_spans)
+        prev_inside_block = self._boundary_hits_span(
+            start=prev_idx,
+            end=prev_idx + 1,
+            lower_bound=span_start,
+            spans=block_math_spans,
+        )
+        next_inside_block = self._boundary_hits_span(
+            start=next_idx,
+            end=next_idx + 1,
+            lower_bound=span_start,
+            spans=block_math_spans,
+        )
         if not (prev_inside_block or next_inside_block):
             return False
 
-        prev_sentence_end = self._looks_like_sentence_end(text, prev_idx)
-        next_continuation = self._looks_like_continuation(text, next_idx)
+        prev_sentence_end = self._is_sentence_end(text, prev_idx)
+        next_continuation = self._is_sentence_continuation(text, next_idx)
         return (not prev_sentence_end) or next_continuation
 
     @staticmethod
@@ -419,6 +432,7 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
         span_start: int,
         span_end: int,
     ) -> int:
+        """Return token count for a character span using cached offsets."""
         token_range = token_offsets.token_range_for_char_span(
             span_start,
             span_end,
@@ -426,12 +440,13 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
         return token_range.end - token_range.start
 
     @staticmethod
-    def _pack_units(
+    def _pack_units_into_windows(
         *,
         units: list[_SpanUnit],
         max_tokens: int,
         overlap_tokens: int,
     ) -> list[_SpanRange]:
+        """Pack token-counted spans into windows with optional overlap."""
         if not units:
             return []
 
@@ -445,9 +460,7 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
 
             while end_index < total_units:
                 unit_tokens = units[end_index].tokens
-                if token_total + unit_tokens > max_tokens and end_index > index:
-                    break
-                if token_total + unit_tokens > max_tokens and end_index == index:
+                if token_total + unit_tokens > max_tokens:
                     break
                 token_total += unit_tokens
                 end_index += 1
@@ -468,10 +481,13 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
             while index < end_index and advanced < target_advance:
                 advanced += units[index].tokens
                 index += 1
-            if index == end_index:
-                index = end_index
 
         return chunks
+
+    @staticmethod
+    def _is_blank_span(text: str, span: _SpanRange) -> bool:
+        """Return True when the span contains only whitespace."""
+        return not text[span.start : span.end].strip()
 
 
 # -----------------------------
@@ -480,7 +496,7 @@ class ParagraphEquationSentenceChunkingStrategy(ChunkingStrategy):
 
 
 class MarkdownChunker:
-    """Main markdown chunker service."""
+    """Chunk markdown documents into a TextNode tree."""
 
     def __init__(
         self,
@@ -491,13 +507,13 @@ class MarkdownChunker:
         header_pattern: re.Pattern = CHUNKING_SETTINGS.header_patterns,
         strategy: ChunkingStrategy | None = None,
     ) -> None:
-        """Initialize a markdown chunker with tokenizer, limits, and strategy."""
+        """Initialize a chunker with tokenizer, limits, and strategy."""
         self._tokenizer_name = tokenizer_name
         self._max_tokens = max_tokens
         self._overlap_tokens = overlap_tokens
         self._header_pattern = header_pattern
 
-        self._strategy = strategy or ParagraphEquationSentenceChunkingStrategy()
+        self._strategy = strategy or ParagraphSentenceMathChunkingStrategy()
 
         self._tokenizer = TokenizerFactory.create(self._tokenizer_name)
 
@@ -515,22 +531,25 @@ class MarkdownChunker:
         self,
         documents: list[DocumentNode],
     ) -> None:
+        """Build section nodes for each document based on headings."""
         for document in documents:
             markdown_text = document.text
-            token_offsets = self._tokenizer.tokenize_with_offsets(
-                markdown_text,
-            )
+            token_offsets = self._tokenizer.tokenize_with_offsets(markdown_text)
             headings = self._extract_headings(markdown_text)
 
             if not headings:
                 raise ValueError(f"Headers not detected for document ID: {document.id}")
 
-            stack: list[_SectionTrail] = []
+            stack: list[_SectionStackEntry] = []
 
-            for i, heading in enumerate(headings):
+            for heading, next_heading in zip(
+                headings,
+                headings[1:] + [None],
+                strict=False,
+            ):
                 next_start = (
-                    headings[i + 1].start
-                    if i + 1 < len(headings)
+                    next_heading.start
+                    if next_heading is not None
                     else len(markdown_text)
                 )
                 section_span = self._trim_whitespace_span(
@@ -542,20 +561,17 @@ class MarkdownChunker:
                 while stack and stack[-1].level >= heading.level:
                     stack.pop()
 
-                parent_node = stack[-1].node if stack else None
-                parent_path = stack[-1].path if stack else ""
-                path = (
-                    f"{parent_path}/{heading.title}" if parent_path else heading.title
-                )
+                parent_trail = stack[-1] if stack else None
+                parent_node = parent_trail.node if parent_trail else None
+                parent_path = parent_trail.path if parent_trail else ""
+                path = self._join_path(parent_path, heading.title)
 
-                node = TextNode(text="")
-                node.parent = parent_node
-                node.document = document
-                node.node_metadata = {
-                    **(node.node_metadata or {}),
-                    "title": heading.title,
-                    "path": path,
-                }
+                node = self._create_section_node(
+                    document=document,
+                    parent=parent_node,
+                    title=heading.title,
+                    path=path,
+                )
 
                 self._assign_or_split_section_text(
                     node=node,
@@ -566,13 +582,14 @@ class MarkdownChunker:
                 )
                 document.children.append(node)
 
-                stack.append(_SectionTrail(heading.level, node, path))
+                stack.append(_SectionStackEntry(heading.level, node, path))
 
     # -------------------------
     # Parsing
     # -------------------------
 
     def _extract_headings(self, text: str) -> list[_Heading]:
+        """Return headings in order using the configured header pattern."""
         return [
             _Heading(
                 level=len(m.group(1)),
@@ -585,6 +602,7 @@ class MarkdownChunker:
 
     @staticmethod
     def _trim_whitespace_span(text: str, start: int, end: int) -> _SpanRange:
+        """Trim leading/trailing whitespace in a span and return new bounds."""
         while start < end and text[start].isspace():
             start += 1
         while end > start and text[end - 1].isspace():
@@ -604,13 +622,8 @@ class MarkdownChunker:
         span_end: int,
         token_offsets: TokenOffsets,
     ) -> None:
-        """Assign section text to node, or split into part-N children if too large."""
+        """Assign section text or split into part-N children if oversized."""
         if span_start >= span_end:
-            node.text = ""
-            return
-
-        section_text = full_text[span_start:span_end]
-        if not section_text:
             node.text = ""
             return
 
@@ -621,7 +634,7 @@ class MarkdownChunker:
         token_count = token_range.end - token_range.start
 
         if token_count <= self._max_tokens:
-            node.text = section_text
+            node.text = full_text[span_start:span_end]
             return
 
         chunks = self._strategy.split_oversized_span(
@@ -635,13 +648,16 @@ class MarkdownChunker:
         node.text = ""
         self._create_part_children(parent=node, chunks=chunks)
 
-    @staticmethod
+    @classmethod
     def _create_part_children(
+        cls,
         *,
         parent: TextNode,
         chunks: list[str],
     ) -> None:
+        """Create part-N child nodes for each chunk and link them sequentially."""
         prev_node: TextNode | None = None
+        parent_path = cls._node_path(parent)
 
         part_index = 0
         for chunk_text in chunks:
@@ -649,23 +665,49 @@ class MarkdownChunker:
                 continue
 
             part_index += 1
-            parent_path = ""
-            if parent.node_metadata is not None:
-                parent_path = str(parent.node_metadata.get("path") or "")
-            path = (
-                f"{parent_path}/part {part_index}"
-                if parent_path
-                else f"part {part_index}"
-            )
+            title = f"part {part_index}"
+            path = cls._join_path(parent_path, title)
+
             child = TextNode(text=chunk_text)
             child.parent = parent
-            child.node_metadata = {
-                **(child.node_metadata or {}),
-                "title": f"part {part_index}",
-                "path": path,
-            }
+            child.node_metadata = cls._metadata_for(child, title=title, path=path)
             if prev_node is not None:
                 child.prev_node = prev_node
                 prev_node.next_node = child
             prev_node = child
             parent.document.children.append(child)
+
+    @staticmethod
+    def _metadata_for(node: TextNode, *, title: str, path: str) -> dict[str, object]:
+        """Build node metadata while preserving any existing values."""
+        return {
+            **(node.node_metadata or {}),
+            "title": title,
+            "path": path,
+        }
+
+    @staticmethod
+    def _node_path(node: TextNode) -> str:
+        """Return the node path from metadata, or an empty string."""
+        return str((node.node_metadata or {}).get("path") or "")
+
+    @staticmethod
+    def _join_path(parent_path: str, title: str) -> str:
+        """Join a parent path with a title component."""
+        return f"{parent_path}/{title}" if parent_path else title
+
+    @classmethod
+    def _create_section_node(
+        cls,
+        *,
+        document: DocumentNode,
+        parent: TextNode | None,
+        title: str,
+        path: str,
+    ) -> TextNode:
+        """Create a section node with parent/doc linkage and metadata."""
+        node = TextNode(text="")
+        node.parent = parent
+        node.document = document
+        node.node_metadata = cls._metadata_for(node, title=title, path=path)
+        return node
