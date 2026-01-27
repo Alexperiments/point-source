@@ -26,14 +26,12 @@ class NodeBase(MappedAsDataclass, DeclarativeBase):
 
     metadata = Base.metadata
     __abstract__ = True
-    __dataclass_kwargs__ = {"kw_only": True}
 
 
 class BaseNode(NodeBase):
     """Abstract text node interface."""
 
     __abstract__ = True
-    __dataclass_kwargs__ = {"kw_only": True}
 
     text: Mapped[str] = mapped_column(Text(), nullable=False)
 
@@ -58,9 +56,6 @@ class BaseNode(NodeBase):
         init=False,
     )
 
-    def __repr__(self) -> str:
-        return f"<node_id={self.id} text={self.text.strip()[:50]} node_metadata={self.node_metadata}>"
-
 
 class TextNode(BaseNode):
     """Text Node Object.
@@ -69,7 +64,6 @@ class TextNode(BaseNode):
     """
 
     __tablename__: str = "document_chunks"
-    __dataclass_kwargs__ = {"kw_only": True}
 
     document_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -132,7 +126,6 @@ class DocumentNode(BaseNode):
     """Document node object."""
 
     __tablename__: str = "documents"
-    __dataclass_kwargs__ = {"kw_only": True}
 
     source_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
 
