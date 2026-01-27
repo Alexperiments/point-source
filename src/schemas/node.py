@@ -1,12 +1,11 @@
 """Node structure definition and mapping to database."""
 
 import uuid
-from typing import Annotated
 
 from pydantic import (
-    AfterValidator,
     BaseModel,
     ConfigDict,
+    Field,
     ValidationInfo,
     model_validator,
 )
@@ -16,22 +15,8 @@ DEFAULT_TEXT_NODE_TMPL = "{metadata_str}\n\n{content}"
 DEFAULT_METADATA_TMPL = "{key}: {value}"
 
 
-def is_positive(value: int) -> int:
-    """Utility function for pydantic validators."""
-    if value < 0:
-        raise ValueError(f"{value} is not a positive number")
-    return value
-
-
-PositiveInteger = Annotated[int, AfterValidator(is_positive)]
-
-
 class BaseNode(BaseModel):
     """Pydantic model of a Base Node."""
-
-    text: str
-    embedding: list[float] | None = None
-    node_metadata: dict | None = None
 
     model_config = ConfigDict(
         validate_assignment=True,
@@ -39,9 +24,10 @@ class BaseNode(BaseModel):
         from_attributes=True,
     )
 
-
-class BaseNodeCreate(BaseNode):
-    """Pydantic model for a base node input."""
+    id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    text: str
+    embedding: list[float] | None = None
+    node_metadata: dict | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -65,88 +51,51 @@ class BaseNodeCreate(BaseNode):
             data["node_metadata"] = {**base_metadata, **node_metadata}
         return data
 
-
-class BaseNodeRead(BaseNode):
-    """Pydantic model for a base node output."""
-
-    id: uuid.UUID
-
-
-class TextNodeCreate(BaseNodeCreate):
-    """Text node create validation model."""
-
-    max_length: PositiveInteger
-    start_index: PositiveInteger
-    end_index: PositiveInteger
-
-    @model_validator(mode="after")
-    def check_text_length(self) -> "TextNodeCreate":
-        """After validator to check text length."""
-        if len(self.text) > self.max_length:
-            raise ValueError(f"text is longer than max_length: {self.max_length}")
-        if len(self.text) != (self.end_index - self.start_index):
-            raise ValueError(
-                f"text length ({len(self.text)}) is different from the length implied by the indexes ({self.end_index - self.start_index})",
+    def get_node_metadata_str(
+        self,
+        metadata_template: str = DEFAULT_METADATA_TMPL,
+    ) -> str:
+        """Get metadata string formatted according to metadata template."""
+        if self.node_metadata is not None:
+            return "\n".join(
+                metadata_template.format(key=k, value=str(v))
+                for k, v in self.node_metadata.items()
             )
-        return self
+        return ""
 
-    @model_validator(mode="after")
-    def check_start_end_consistency(self) -> "TextNodeCreate":
-        """After validator to check that end_index >= start_index."""
-        if self.end_index < self.start_index:
-            raise ValueError(
-                f"end_index is smaller than start_index ({self.end_index} < {self.start_index}).",
-            )
-        return self
+    def get_content(
+        self,
+        text_template: str = DEFAULT_TEXT_NODE_TMPL,
+    ) -> str:
+        """Get object content according to the text template, using the specified metadata mode."""
+        metadata_str = self.get_node_metadata_str().strip()
+
+        return text_template.format(
+            content=self.text,
+            metadata_str=metadata_str,
+        ).strip()
 
 
-class TextNodeRead(BaseNodeRead):
-    """Text node read validation model."""
+class TextNode(BaseNode):
+    """A hierarchical chunk of text extracted from a document."""
 
-    max_char_size: PositiveInteger
-    start_char_index: PositiveInteger
-    end_char_index: PositiveInteger
-    source_id: uuid.UUID | None = None
+    title: str
+    path: str
+    document_id: uuid.UUID | None = None
     parent_id: uuid.UUID | None = None
-    children_ids: list[uuid.UUID] | None = None
     prev_id: uuid.UUID | None = None
     next_id: uuid.UUID | None = None
+    children_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
-class DocumentNodeCreate(BaseNodeCreate):
+class DocumentNodeCreate(BaseNode):
     """Document node create validation model."""
 
     source_id: str
 
 
-class DocumentNodeRead(BaseNodeRead):
+class DocumentNodeRead(BaseNode):
     """Document node read validation model."""
 
     source_id: str
     children_ids: list[uuid.UUID] | None = None
-
-
-def get_node_metadata_str(
-    text_node: BaseNode,
-    metadata_template: str = DEFAULT_METADATA_TMPL,
-) -> str:
-    """Get metadata string formatted according to metadata template."""
-    if text_node.node_metadata is not None:
-        return "\n".join(
-            metadata_template.format(key=k, value=str(v))
-            for k, v in text_node.node_metadata.items()
-        )
-    return ""
-
-
-def get_content(
-    text_node: BaseNode,
-    text_template: str = DEFAULT_TEXT_NODE_TMPL,
-) -> str:
-    """Get object content according to the text template, using the specified metadata mode."""
-    metadata_str = get_node_metadata_str(text_node).strip()
-
-    return text_template.format(
-        content=text_node.text,
-        metadata_str=metadata_str,
-    ).strip()
