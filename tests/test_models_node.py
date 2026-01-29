@@ -69,7 +69,7 @@ class TestBaseNodeInitialization:
         """Test assigning metadata and embeddings after creation."""
         node = TextNode(text="Sample text")
         node.node_metadata = {"key": "value"}
-        node.embedding = [0.1] * 768
+        node.embedding = [0.1] * 1024
         session.add(node)
         session.flush()
 
