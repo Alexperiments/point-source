@@ -74,7 +74,7 @@ class TestBaseNodeInitialization:
         session.flush()
 
         assert node.node_metadata == {"key": "value"}
-        assert node.embedding == [0.1] * 768
+        assert node.embedding == [0.1] * 1024
 
 
 # ============================================================================
