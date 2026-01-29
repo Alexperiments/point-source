@@ -1,7 +1,3 @@
-Got it. Let's strip the marketing fluff and get straight to the engineering. Here is a grounded, "developer-to-developer" version of the README.
-
----
-
 # point-source
 
 A RAG (Retrieval-Augmented Generation) tool for querying astrophysics papers from ArXiv.
