@@ -45,6 +45,22 @@ class ChunkingSettings(BaseSettings):
         r"[.!?]+[\"')\]]*(?:\s+|$)",
         re.MULTILINE,
     )
+    citation_command_prefixes: tuple[str, ...] = (
+        "\\cite",
+        "\\citet",
+        "\\citep",
+        "\\citealp",
+        "\\citeauthor",
+        "\\citeyear",
+        "\\parencite",
+        "\\textcite",
+        "\\footcite",
+        "\\ref",
+        "\\eqref",
+        "\\autoref",
+        "\\cref",
+        "\\Cref",
+    )
 
 
 CHUNKING_SETTINGS = ChunkingSettings()

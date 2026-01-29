@@ -11,7 +11,7 @@ import logfire
 
 from src.core.chunking_config import CHUNKING_SETTINGS
 from src.models.node import DocumentNode, TextNode
-from src.services.tokenizer_service import TokenizerFactory, TokenOffsets
+from src.services.embedding_service import EmbeddingService, TokenOffsets
 
 
 chunked_documents_metric = logfire.metric_counter(
@@ -88,12 +88,17 @@ class ParagraphSentenceMathChunkingStrategy:
         sentence_boundary_pattern: re.Pattern = CHUNKING_SETTINGS.sentence_patterns,
         inline_math_pattern: re.Pattern = CHUNKING_SETTINGS.inline_latex_math_patterns,
         block_math_pattern: re.Pattern = CHUNKING_SETTINGS.block_latex_math_patterns,
+        citation_command_prefixes: tuple[
+            str,
+            ...,
+        ] = CHUNKING_SETTINGS.citation_command_prefixes,
     ) -> None:
         """Store regex patterns for paragraph breaks, sentences, and math blocks."""
         self._paragraph_break_pattern = paragraph_break_pattern
         self._sentence_boundary_pattern = sentence_boundary_pattern
         self._inline_math_pattern = inline_math_pattern
         self._block_math_pattern = block_math_pattern
+        self._citation_command_prefixes = citation_command_prefixes
 
     def split_oversized_span(
         self,
@@ -384,13 +389,23 @@ class ParagraphSentenceMathChunkingStrategy:
             cursor -= 1
         return cursor >= 0 and text[cursor] in ".!?"
 
-    @classmethod
-    def _is_sentence_continuation(cls, text: str, index: int) -> bool:
+    def _is_sentence_continuation(self, text: str, index: int) -> bool:
         """Heuristic: lowercase/digit/leading bracket implies continuation."""
         char = text[index]
         if char.islower() or char.isdigit():
             return True
-        return char in "([{"
+        if char in "([{":
+            return True
+        if char == "\\":
+            if index + 1 < len(text) and text[index + 1] in "[(":
+                return True
+            if text.startswith("\\\\", index):
+                return True
+            return any(
+                text.startswith(prefix, index)
+                for prefix in self._citation_command_prefixes
+            )
+        return False
 
     def _should_skip_paragraph_split(
         self,
@@ -502,7 +517,9 @@ class MarkdownChunker:
 
         self._strategy = strategy or ParagraphSentenceMathChunkingStrategy()
 
-        self._tokenizer = TokenizerFactory.create(embedding_model_name)
+        self._embedding_service = EmbeddingService(
+            embedding_model_name=embedding_model_name,
+        )
 
     @logfire.instrument(
         "chunking_service.chunk",
@@ -529,7 +546,9 @@ class MarkdownChunker:
         base_metadata = dict(metadata) if metadata else None
         for document in documents:
             markdown_text = document.text
-            token_offsets = self._tokenizer.tokenize_with_offsets(markdown_text)
+            token_offsets = self._embedding_service.tokenize_with_offsets_mapping(
+                markdown_text,
+            )
             headings = self._extract_headings(markdown_text)
 
             if not headings:
