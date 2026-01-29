@@ -63,6 +63,7 @@ class ChunkingStrategy(Protocol):
     def split_oversized_span(
         self,
         token_offsets: TokenOffsets,
+        text: str,
         span_start: int,
         span_end: int,
         max_tokens: int,
@@ -97,13 +98,13 @@ class ParagraphSentenceMathChunkingStrategy:
     def split_oversized_span(
         self,
         token_offsets: TokenOffsets,
+        text: str,
         span_start: int,
         span_end: int,
         max_tokens: int,
         overlap_tokens: int,
     ) -> list[str]:
         """Split a large span by paragraph/sentence boundaries without cutting math."""
-        text = token_offsets.text
         if span_start >= span_end:
             return [text[span_start:span_end]]
 
@@ -157,8 +158,7 @@ class ParagraphSentenceMathChunkingStrategy:
         for paragraph in paragraph_spans:
             if self._is_blank_span(text, paragraph):
                 continue
-            para_tokens = self._token_count(
-                token_offsets,
+            para_tokens = token_offsets.count_tokens_from_span(
                 paragraph.start,
                 paragraph.end,
             )
@@ -179,15 +179,15 @@ class ParagraphSentenceMathChunkingStrategy:
             for sentence in sentence_spans:
                 if self._is_blank_span(text, sentence):
                     continue
-                sent_tokens = self._token_count(
-                    token_offsets,
+                sent_tokens = token_offsets.count_tokens_from_span(
                     sentence.start,
                     sentence.end,
                 )
+
                 units.append(_SpanUnit(sentence.start, sentence.end, sent_tokens))
 
         if not units:
-            total_tokens = self._token_count(token_offsets, span_start, span_end)
+            total_tokens = token_offsets.count_tokens_from_span(span_start, span_end)
             units.append(_SpanUnit(span_start, span_end, total_tokens))
         return units
 
@@ -428,19 +428,6 @@ class ParagraphSentenceMathChunkingStrategy:
         return (not prev_sentence_end) or next_continuation
 
     @staticmethod
-    def _token_count(
-        token_offsets: TokenOffsets,
-        span_start: int,
-        span_end: int,
-    ) -> int:
-        """Return token count for a character span using cached offsets."""
-        token_range = token_offsets.token_range_for_char_span(
-            span_start,
-            span_end,
-        )
-        return token_range.end - token_range.start
-
-    @staticmethod
     def _pack_units_into_windows(
         *,
         units: list[_SpanUnit],
@@ -502,37 +489,44 @@ class MarkdownChunker:
     def __init__(
         self,
         *,
-        tokenizer_name: str = CHUNKING_SETTINGS.tokenizer_name,
+        embedding_model_name: str = CHUNKING_SETTINGS.embedding_model_name,
         max_tokens: int = CHUNKING_SETTINGS.max_tokens,
         overlap_tokens: int = CHUNKING_SETTINGS.overlap_tokens,
         header_pattern: re.Pattern = CHUNKING_SETTINGS.header_patterns,
         strategy: ChunkingStrategy | None = None,
     ) -> None:
         """Initialize a chunker with tokenizer, limits, and strategy."""
-        self._tokenizer_name = tokenizer_name
         self._max_tokens = max_tokens
         self._overlap_tokens = overlap_tokens
         self._header_pattern = header_pattern
 
         self._strategy = strategy or ParagraphSentenceMathChunkingStrategy()
 
-        self._tokenizer = TokenizerFactory.create(self._tokenizer_name)
+        self._tokenizer = TokenizerFactory.create(embedding_model_name)
 
     @logfire.instrument(
-        "document_chunking_service",
-        extract_args=["documents"],
+        "chunking_service.chunk",
+        extract_args=False,
     )
-    def chunk(self, documents: Sequence[DocumentNode]) -> None:
+    def chunk(
+        self,
+        documents: Sequence[DocumentNode],
+        *,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
         """Chunk documents into TextNode trees rooted at each DocumentNode."""
-        self._chunk_internal(documents)
-        chunked_documents_metric.add(len(documents))
-        logfire.info("documents_chunking completed")
+        with logfire.span(f"chunking {len(documents)} documents."):
+            self._chunk_internal(documents, metadata=metadata)
+            logfire.info("documents_chunking completed")
 
     def _chunk_internal(
         self,
         documents: Sequence[DocumentNode],
+        *,
+        metadata: dict[str, object] | None = None,
     ) -> None:
         """Build section nodes for each document based on headings."""
+        base_metadata = dict(metadata) if metadata else None
         for document in documents:
             markdown_text = document.text
             token_offsets = self._tokenizer.tokenize_with_offsets(markdown_text)
@@ -572,6 +566,7 @@ class MarkdownChunker:
                     parent=parent_node,
                     title=heading.title,
                     path=path,
+                    base_metadata=base_metadata,
                 )
 
                 self._assign_or_split_section_text(
@@ -580,10 +575,13 @@ class MarkdownChunker:
                     span_start=section_span.start,
                     span_end=section_span.end,
                     token_offsets=token_offsets,
+                    base_metadata=base_metadata,
                 )
                 document.children.append(node)
 
                 stack.append(_SectionStackEntry(heading.level, node, path))
+
+            chunked_documents_metric.add(1)
 
     # -------------------------
     # Parsing
@@ -622,17 +620,17 @@ class MarkdownChunker:
         span_start: int,
         span_end: int,
         token_offsets: TokenOffsets,
+        base_metadata: dict[str, object] | None = None,
     ) -> None:
         """Assign section text or split into part-N children if oversized."""
         if span_start >= span_end:
             node.text = ""
             return
 
-        token_range = token_offsets.token_range_for_char_span(
+        token_count = token_offsets.count_tokens_from_span(
             span_start,
             span_end,
         )
-        token_count = token_range.end - token_range.start
 
         if token_count <= self._max_tokens:
             node.text = full_text[span_start:span_end]
@@ -640,6 +638,7 @@ class MarkdownChunker:
 
         chunks = self._strategy.split_oversized_span(
             token_offsets=token_offsets,
+            text=full_text,
             span_start=span_start,
             span_end=span_end,
             max_tokens=self._max_tokens,
@@ -647,18 +646,26 @@ class MarkdownChunker:
         )
 
         node.text = ""
-        self._create_part_children(parent=node, chunks=chunks)
+        non_empty_chunks = [chunk for chunk in chunks if chunk]
+        if not non_empty_chunks:
+            return
 
-    @classmethod
+        self._create_part_children(
+            parent=node,
+            chunks=non_empty_chunks,
+            base_metadata=base_metadata,
+        )
+
     def _create_part_children(
-        cls,
+        self,
         *,
         parent: TextNode,
         chunks: list[str],
+        base_metadata: dict[str, object] | None = None,
     ) -> None:
         """Create part-N child nodes for each chunk and link them sequentially."""
         prev_node: TextNode | None = None
-        parent_path = cls._node_path(parent)
+        parent_path = self._node_path(parent)
 
         part_index = 0
         for chunk_text in chunks:
@@ -667,11 +674,13 @@ class MarkdownChunker:
 
             part_index += 1
             title = f"part {part_index}"
-            path = cls._join_path(parent_path, title)
+            path = self._join_path(parent_path, title)
 
             child = TextNode(text=chunk_text)
             child.parent = parent
-            child.node_metadata = cls._metadata_for(child, title=title, path=path)
+            if base_metadata:
+                child.node_metadata = dict(base_metadata)
+            child.node_metadata = self._metadata_for(child, title=title, path=path)
             if prev_node is not None:
                 child.prev_node = prev_node
                 prev_node.next_node = child
@@ -705,10 +714,13 @@ class MarkdownChunker:
         parent: TextNode | None,
         title: str,
         path: str,
+        base_metadata: dict[str, object] | None = None,
     ) -> TextNode:
         """Create a section node with parent/doc linkage and metadata."""
         node = TextNode(text="")
         node.parent = parent
         node.document = document
+        if base_metadata:
+            node.node_metadata = dict(base_metadata)
         node.node_metadata = cls._metadata_for(node, title=title, path=path)
         return node

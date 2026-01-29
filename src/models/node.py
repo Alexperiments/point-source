@@ -43,7 +43,7 @@ class BaseNode(NodeBase):
     )
 
     embedding: Mapped[list[float] | None] = mapped_column(
-        Vector(768),
+        Vector(1024),
         nullable=True,
         default=None,
         init=False,

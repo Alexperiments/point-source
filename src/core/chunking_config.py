@@ -24,7 +24,7 @@ class ChunkingSettings(BaseSettings):
         env_prefix="CHUNKING_",
     )
 
-    tokenizer_name: str = Field(default="Qwen/Qwen3-Embedding-0.6B")
+    embedding_model_name: str = Field(default="Qwen/Qwen3-Embedding-0.6B")
     max_tokens: int = Field(default=256)
     overlap_tokens: int = Field(default=0)
 

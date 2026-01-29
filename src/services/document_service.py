@@ -43,7 +43,7 @@ class DocumentService:
         self.chunker = chunker or MarkdownChunker()
 
     @logfire.instrument(
-        "document_ingestion_service",
+        "document_servie.ingest_document",
         extract_args=["batch_size", "metadata"],
     )
     async def ingest_document(
@@ -91,13 +91,22 @@ class DocumentService:
 
         ingested_documents_metric.add(inserted_rows_count)
 
-    @logging.auto_instrument()
+    @logfire.instrument(
+        "document_service.chunk_documents",
+        extract_args=["batch_size", "metadata"],
+    )
     async def chunk_documents(
         self,
         documents: Sequence[DocumentNode],
         batch_size: int = 1000,
+        metadata: dict | None = None,
     ) -> None:
         """Chunk the documents pointed by the provided UUIDs."""
+        if self.chunker is None:
+            raise ValueError(
+                "Chunker not initialized, construct a DocumentService instance defining a chunking service instance.",
+            )
         async for batch in async_itertools.batched(documents, batch_size):
-            self.chunker.chunk(batch)
-            await self.session.commit()
+            self.chunker.chunk(batch, metadata=metadata)
+            with logfire.span("Commit chunks into database"):
+                await self.session.commit()
