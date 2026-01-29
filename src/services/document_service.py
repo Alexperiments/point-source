@@ -4,24 +4,13 @@ from collections.abc import AsyncIterable, Iterable, Sequence
 
 import logfire
 from aioitertools import itertools as async_itertools
-from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core import logging
-from src.core.database.utils import insert_many
 from src.models.node import DocumentNode
-from src.schemas.node import DocumentNodeCreate
 from src.services.chunking_service import MarkdownChunker
 
 
-DocumentNodeBatchAdapter = TypeAdapter(list[DocumentNodeCreate])
-
-
-validated_documents_metric = logfire.metric_counter(
-    "papers_processed",
-    unit="1",
-    description="Number of valide papers fetched.",
-)
 ingested_documents_metric = logfire.metric_counter(
     "documents_ingested",
     unit="1",
@@ -44,52 +33,69 @@ class DocumentService:
 
     @logfire.instrument(
         "document_servie.ingest_document",
-        extract_args=["batch_size", "metadata"],
+        extract_args=["batch_size", "metadata", "perform_chunking"],
     )
     async def ingest_document(
         self,
         rows: Iterable[dict] | AsyncIterable[dict],
         batch_size: int = 1000,
+        *,
+        perform_chunking: bool = False,
         metadata: dict | None = None,
     ) -> None:
-        """Ingest all the documents from an iterable, after pydantic validation following DocumentNode model."""
+        """Ingest all the documents from an iterable of row dicts."""
         async for batch in async_itertools.batched(rows, batch_size):
-            validated_batch = await self._validate_batch_with_metadata(
+            documents = await self._build_documents_from_dicts(
                 batch=batch,
                 metadata=metadata,
             )
-            await self._ingest_batch(batch=validated_batch)
+            if perform_chunking:
+                await self.chunk_documents(
+                    documents,
+                    batch_size=batch_size,
+                    metadata=metadata,
+                )
+            await self.session.add_all(documents)
+            await self.session.flush()
+
+            ingested_documents_metric.add(len(batch))
 
         logfire.info("documents_ingestion completed")
 
     @logging.auto_instrument()
-    async def _validate_batch_with_metadata(
+    async def _build_documents_from_dicts(
         self,
-        batch: Sequence[dict],
+        dict_documents_list: Sequence[dict],
         metadata: dict | None = None,
-    ) -> list[dict]:
-        validated_models = DocumentNodeBatchAdapter.validate_python(
-            batch,
-            context={"base_metadata": metadata},
-        )
+    ) -> list[DocumentNode]:
+        base_metadata = dict(metadata) if metadata else None
+        documents: list[DocumentNode] = []
 
-        validated_documents_metric.add(len(validated_models))
+        for row in dict_documents_list:
+            document = DocumentNode(
+                text=row["text"],
+                source_id=row["source_id"],
+            )
+            if "id" in row and row["id"] is not None:
+                document.id = row["id"]
+            if "embedding" in row:
+                document.embedding = row["embedding"]
 
-        return [model.model_dump() for model in validated_models]
+            node_metadata = row.get("node_metadata")
+            if base_metadata:
+                if node_metadata is None:
+                    node_metadata = dict(base_metadata)
+                else:
+                    node_metadata = {
+                        **base_metadata,
+                        **node_metadata,
+                    }
+            if node_metadata is not None:
+                document.node_metadata = node_metadata
 
-    @logging.auto_instrument()
-    async def _ingest_batch(
-        self,
-        batch: Sequence[dict],
-    ) -> None:
-        """Ingest a batch of documents."""
-        inserted_rows_count = await insert_many(
-            self.session,
-            DocumentNode,
-            batch,
-        )
+            documents.append(document)
 
-        ingested_documents_metric.add(inserted_rows_count)
+        return documents
 
     @logfire.instrument(
         "document_service.chunk_documents",
