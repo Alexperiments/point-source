@@ -9,11 +9,7 @@ from src.core.database.base import async_session
 from src.services.document_service import DocumentService
 
 
-logfire.configure(
-    metrics=logfire.MetricsOptions(
-        collect_in_spans=True,
-    ),
-)
+logfire.configure()
 
 
 async def main() -> None:
@@ -30,9 +26,9 @@ async def main() -> None:
             load_dataset(
                 dataset_name,
                 split="train",
-                streaming=True,
+                streaming=False,
             )
-            .filter(lambda row: category in row["id"])
+            .filter(lambda row: (category in row["id"]) & (len(row["text"]) >= 1000))
             .remove_columns(["source", "format"])
             .rename_column("id", "source_id")
         )
@@ -45,6 +41,7 @@ async def main() -> None:
             await service.ingest_document(
                 rows=dataset,
                 batch_size=1000,
+                perform_chunking=True,
                 metadata={"source": dataset_name, "category": category},
             )
             await session.commit()
