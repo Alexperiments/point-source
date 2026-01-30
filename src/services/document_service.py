@@ -32,7 +32,7 @@ class DocumentService:
         self.chunker = chunker or MarkdownChunker()
 
     @logfire.instrument(
-        "document_servie.ingest_document",
+        "document_service.ingest_document",
         extract_args=["batch_size", "metadata", "perform_chunking"],
     )
     async def ingest_document(
@@ -45,20 +45,21 @@ class DocumentService:
     ) -> None:
         """Ingest all the documents from an iterable of row dicts."""
         async for batch in async_itertools.batched(rows, batch_size):
-            documents = await self._build_documents_from_dicts(
-                batch=batch,
-                metadata=metadata,
-            )
-            if perform_chunking:
-                await self.chunk_documents(
-                    documents,
-                    batch_size=batch_size,
+            with logfire.span(f"Ingest {len(batch)} documents."):
+                documents = await self._build_documents_from_dicts(
+                    dict_documents_list=batch,
                     metadata=metadata,
                 )
-            await self.session.add_all(documents)
-            await self.session.flush()
+                if perform_chunking:
+                    await self.chunk_documents(
+                        documents,
+                        batch_size=batch_size,
+                        metadata=metadata,
+                    )
+                self.session.add_all(documents)
+                await self.session.flush()
 
-            ingested_documents_metric.add(len(batch))
+                ingested_documents_metric.add(len(batch))
 
         logfire.info("documents_ingestion completed")
 

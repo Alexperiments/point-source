@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import re  # noqa: TC003
+import re
 from collections.abc import Sequence  # noqa: TC003
 from dataclasses import dataclass
 from typing import Protocol
@@ -12,13 +12,6 @@ import logfire
 from src.core.chunking_config import CHUNKING_SETTINGS
 from src.models.node import DocumentNode, TextNode
 from src.services.embedding_service import EmbeddingService, TokenOffsets
-
-
-chunked_documents_metric = logfire.metric_counter(
-    "documents_chunked",
-    unit="1",
-    description="Number of documents chunked.",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,11 +280,10 @@ class ParagraphSentenceMathChunkingStrategy:
         span_end: int,
     ) -> tuple[list[_SpanRange], list[_SpanRange]]:
         """Return merged spans for all math and for block math only."""
-        block_spans = self._collect_pattern_spans(
+        block_spans = self._collect_block_math_spans(
             text=text,
             span_start=span_start,
             span_end=span_end,
-            patterns=[self._block_math_pattern],
         )
         inline_spans = self._collect_pattern_spans(
             text=text,
@@ -302,6 +294,55 @@ class ParagraphSentenceMathChunkingStrategy:
         block_math_spans = self._merge_overlapping_spans(block_spans)
         math_spans = self._merge_overlapping_spans([*block_spans, *inline_spans])
         return math_spans, block_math_spans
+
+    @staticmethod
+    def _collect_block_math_spans(
+        *,
+        text: str,
+        span_start: int,
+        span_end: int,
+    ) -> list[_SpanRange]:
+        r"""Collect $$...$$, \\[...\\], and \\begin{...}...\\end{...} spans safely."""
+        spans: list[_SpanRange] = []
+        cursor = span_start
+        while cursor < span_end:
+            next_dollars = text.find("$$", cursor, span_end)
+            next_bracket = text.find("\\[", cursor, span_end)
+            next_begin = text.find("\\begin{", cursor, span_end)
+            next_positions = [
+                pos for pos in (next_dollars, next_bracket, next_begin) if pos != -1
+            ]
+            if not next_positions:
+                break
+            start = min(next_positions)
+
+            if start == next_dollars:
+                end = text.find("$$", start + 2, span_end)
+                if end == -1:
+                    break
+                spans.append(_SpanRange(start, end + 2))
+                cursor = end + 2
+                continue
+
+            if start == next_bracket:
+                end = text.find("\\]", start + 2, span_end)
+                if end == -1:
+                    break
+                spans.append(_SpanRange(start, end + 2))
+                cursor = end + 2
+                continue
+
+            end_brace = text.find("}", start + 7, span_end)
+            if end_brace == -1:
+                break
+            env = text[start + 7 : end_brace]
+            end_tag = f"\\end{{{env}}}"
+            end = text.find(end_tag, end_brace + 1, span_end)
+            if end == -1:
+                break
+            spans.append(_SpanRange(start, end + len(end_tag)))
+            cursor = end + len(end_tag)
+        return spans
 
     @staticmethod
     def _collect_pattern_spans(
@@ -508,12 +549,20 @@ class MarkdownChunker:
         max_tokens: int = CHUNKING_SETTINGS.max_tokens,
         overlap_tokens: int = CHUNKING_SETTINGS.overlap_tokens,
         header_pattern: re.Pattern = CHUNKING_SETTINGS.header_patterns,
+        drop_section_title_prefixes: tuple[
+            str,
+            ...,
+        ] = CHUNKING_SETTINGS.drop_section_title_prefixes,
         strategy: ChunkingStrategy | None = None,
     ) -> None:
         """Initialize a chunker with tokenizer, limits, and strategy."""
         self._max_tokens = max_tokens
         self._overlap_tokens = overlap_tokens
         self._header_pattern = header_pattern
+        self._drop_section_prefixes = tuple(
+            self._normalize_heading_title(prefix)
+            for prefix in drop_section_title_prefixes
+        )
 
         self._strategy = strategy or ParagraphSentenceMathChunkingStrategy()
 
@@ -552,15 +601,26 @@ class MarkdownChunker:
             headings = self._extract_headings(markdown_text)
 
             if not headings:
-                raise ValueError(f"Headers not detected for document ID: {document.id}")
+                raise ValueError(
+                    f"Headers not detected for document ID: {document.id}",
+                )
 
             stack: list[_SectionStackEntry] = []
+            drop_level: int | None = None
 
             for heading, next_heading in zip(
                 headings,
                 [*headings[1:], None],
                 strict=False,
             ):
+                if drop_level is not None and heading.level <= drop_level:
+                    drop_level = None
+                if drop_level is not None:
+                    continue
+                if self._should_drop_heading(heading.title):
+                    drop_level = heading.level
+                    continue
+
                 next_start = (
                     next_heading.start
                     if next_heading is not None
@@ -600,8 +660,6 @@ class MarkdownChunker:
 
                 stack.append(_SectionStackEntry(heading.level, node, path))
 
-            chunked_documents_metric.add(1)
-
     # -------------------------
     # Parsing
     # -------------------------
@@ -617,6 +675,21 @@ class MarkdownChunker:
             )
             for m in self._header_pattern.finditer(text)
         ]
+
+    @staticmethod
+    def _normalize_heading_title(title: str) -> str:
+        """Normalize headings for simple prefix matching."""
+        normalized = title.lower().replace("&", "and")
+        normalized = re.sub(r"[^\w\s]", " ", normalized)
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    def _should_drop_heading(self, title: str) -> bool:
+        """Return True for reference/acknowledgement-like sections."""
+        normalized = self._normalize_heading_title(title)
+        for prefix in self._drop_section_prefixes:
+            if normalized == prefix or normalized.startswith(f"{prefix} "):
+                return True
+        return False
 
     @staticmethod
     def _trim_whitespace_span(text: str, start: int, end: int) -> _SpanRange:
