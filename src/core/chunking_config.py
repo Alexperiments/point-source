@@ -27,7 +27,7 @@ class ChunkingSettings(BaseSettings):
     embedding_model_name: str = Field(default="Qwen/Qwen3-Embedding-0.6B")
     max_tokens: int = Field(default=256)
     overlap_tokens: int = Field(default=0)
-    min_chunk_tokens: int = Field(default=5)
+    min_chunk_chars: int = Field(default=20)
 
     inline_latex_math_patterns: re.Pattern = re.compile(
         r"(?<!\$)\$(?!\$)(?:\\.|[^$\n\\])+?\$(?!\$)|\\\((?:\\.|[^\\)\n])+?\\\)",
