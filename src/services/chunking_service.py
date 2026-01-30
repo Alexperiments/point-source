@@ -85,6 +85,7 @@ class ParagraphSentenceMathChunkingStrategy:
             str,
             ...,
         ] = CHUNKING_SETTINGS.citation_command_prefixes,
+        min_chunk_tokens: int = CHUNKING_SETTINGS.min_chunk_tokens,
     ) -> None:
         """Store regex patterns for paragraph breaks, sentences, and math blocks."""
         self._paragraph_break_pattern = paragraph_break_pattern
@@ -92,6 +93,11 @@ class ParagraphSentenceMathChunkingStrategy:
         self._inline_math_pattern = inline_math_pattern
         self._block_math_pattern = block_math_pattern
         self._citation_command_prefixes = citation_command_prefixes
+        self._min_chunk_tokens = min_chunk_tokens
+        self._abbreviation_pattern = re.compile(
+            r"(?:\b(?:e|i)\.g\.|\b(?:e|i)\.e\.)$",
+            re.IGNORECASE,
+        )
 
     def split_oversized_span(
         self,
@@ -127,10 +133,14 @@ class ParagraphSentenceMathChunkingStrategy:
             overlap_tokens=overlap_tokens,
         )
 
-        chunks = [
-            text[span.start : span.end] for span in chunk_spans if span.start < span.end
-        ]
-        return chunks or [text[span_start:span_end]]
+        chunk_spans = [span for span in chunk_spans if span.start < span.end]
+        if self._min_chunk_tokens > 0:
+            chunk_spans = self._merge_small_chunk_spans(
+                chunk_spans,
+                token_offsets=token_offsets,
+            )
+
+        return [text[span.start : span.end] for span in chunk_spans]
 
     def _build_split_units(
         self,
@@ -206,21 +216,21 @@ class ParagraphSentenceMathChunkingStrategy:
             sep_start, sep_end = match.start(), match.end()
             if sep_start <= cursor:
                 continue
-            if self._boundary_hits_span(
+            hits_math = self._boundary_hits_span(
                 start=sep_start,
                 end=sep_end,
                 lower_bound=span_start,
                 spans=math_spans,
-            ):
-                continue
-            if self._should_skip_paragraph_split(
+            )
+            should_skip = self._should_skip_paragraph_split(
                 text=text,
                 sep_start=sep_start,
                 sep_end=sep_end,
                 span_start=span_start,
                 span_end=span_end,
                 block_math_spans=block_math_spans,
-            ):
+            )
+            if hits_math or should_skip:
                 continue
 
             spans.append(_SpanRange(cursor, sep_start))
@@ -247,19 +257,23 @@ class ParagraphSentenceMathChunkingStrategy:
             para_end,
         ):
             boundary = match.end()
-            if boundary <= para_start or boundary >= para_end:
+            if not (para_start < boundary < para_end):
                 continue
-            if self._boundary_hits_span(
+            hits_math = self._boundary_hits_span(
                 start=match.start(),
                 end=boundary,
                 lower_bound=para_start,
                 spans=math_spans,
-            ):
+            )
+            if hits_math or self._ends_with_abbreviation(text, match.start()):
                 continue
             next_idx = self._find_next_nonspace(text, boundary, para_end)
-            if next_idx is not None and self._is_sentence_continuation(text, next_idx):
-                continue
-            boundaries.append(boundary)
+            is_continuation = next_idx is not None and self._is_sentence_continuation(
+                text,
+                next_idx,
+            )
+            if not is_continuation:
+                boundaries.append(boundary)
 
         spans: list[_SpanRange] = []
         cursor = para_start
@@ -306,42 +320,37 @@ class ParagraphSentenceMathChunkingStrategy:
         spans: list[_SpanRange] = []
         cursor = span_start
         while cursor < span_end:
-            next_dollars = text.find("$$", cursor, span_end)
-            next_bracket = text.find("\\[", cursor, span_end)
-            next_begin = text.find("\\begin{", cursor, span_end)
-            next_positions = [
-                pos for pos in (next_dollars, next_bracket, next_begin) if pos != -1
+            next_positions = {
+                "dollars": text.find("$$", cursor, span_end),
+                "bracket": text.find("\\[", cursor, span_end),
+                "begin": text.find("\\begin{", cursor, span_end),
+            }
+            start_candidates = [
+                (kind, pos) for kind, pos in next_positions.items() if pos != -1
             ]
-            if not next_positions:
+            if not start_candidates:
                 break
-            start = min(next_positions)
+            kind, start = min(start_candidates, key=lambda item: item[1])
 
-            if start == next_dollars:
+            if kind == "dollars":
                 end = text.find("$$", start + 2, span_end)
-                if end == -1:
-                    break
-                spans.append(_SpanRange(start, end + 2))
-                cursor = end + 2
-                continue
-
-            if start == next_bracket:
+                end_tag_length = 2
+            elif kind == "bracket":
                 end = text.find("\\]", start + 2, span_end)
-                if end == -1:
+                end_tag_length = 2
+            else:
+                end_brace = text.find("}", start + 7, span_end)
+                if end_brace == -1:
                     break
-                spans.append(_SpanRange(start, end + 2))
-                cursor = end + 2
-                continue
+                env = text[start + 7 : end_brace]
+                end_tag = f"\\end{{{env}}}"
+                end = text.find(end_tag, end_brace + 1, span_end)
+                end_tag_length = len(end_tag)
 
-            end_brace = text.find("}", start + 7, span_end)
-            if end_brace == -1:
-                break
-            env = text[start + 7 : end_brace]
-            end_tag = f"\\end{{{env}}}"
-            end = text.find(end_tag, end_brace + 1, span_end)
             if end == -1:
                 break
-            spans.append(_SpanRange(start, end + len(end_tag)))
-            cursor = end + len(end_tag)
+            spans.append(_SpanRange(start, end + end_tag_length))
+            cursor = end + end_tag_length
         return spans
 
     @staticmethod
@@ -393,12 +402,11 @@ class ParagraphSentenceMathChunkingStrategy:
             return False
         end_check = end - 1
         has_end_check = end_check >= lower_bound
-        for span in spans:
-            if span.start <= start < span.end:
-                return True
-            if has_end_check and span.start <= end_check < span.end:
-                return True
-        return False
+        return any(
+            span.start <= start < span.end
+            or (has_end_check and span.start <= end_check < span.end)
+            for span in spans
+        )
 
     @staticmethod
     def _find_prev_nonspace(text: str, start: int, lower_bound: int) -> int | None:
@@ -420,33 +428,27 @@ class ParagraphSentenceMathChunkingStrategy:
             index += 1
         return None
 
-    @classmethod
-    def _is_sentence_end(cls, text: str, index: int) -> bool:
+    def _is_sentence_end(self, text: str, index: int) -> bool:
         """Heuristic: trailing punctuation (ignoring quotes/brackets) ends a sentence."""
-        cursor = index
-        while cursor >= 0 and text[cursor].isspace():
-            cursor -= 1
-        while cursor >= 0 and text[cursor] in "\"')]}":
-            cursor -= 1
-        return cursor >= 0 and text[cursor] in ".!?"
+        cursor = self._normalize_sentence_end_index(text, index)
+        if cursor < 0:
+            return False
+        is_terminal = text[cursor] in ".!?"
+        return is_terminal and not self._ends_with_abbreviation(text, cursor)
 
     def _is_sentence_continuation(self, text: str, index: int) -> bool:
         """Heuristic: lowercase/digit/leading bracket implies continuation."""
         char = text[index]
-        if char.islower() or char.isdigit():
+        if char.islower() or char.isdigit() or char in "([{" or char == "$":
             return True
-        if char in "([{":
-            return True
-        if char == "\\":
-            if index + 1 < len(text) and text[index + 1] in "[(":
-                return True
-            if text.startswith("\\\\", index):
-                return True
-            return any(
-                text.startswith(prefix, index)
-                for prefix in self._citation_command_prefixes
-            )
-        return False
+        if char != "\\":
+            return False
+        next_is_bracket = index + 1 < len(text) and text[index + 1] in "[("
+        is_double_backslash = text.startswith("\\\\", index)
+        is_citation = any(
+            text.startswith(prefix, index) for prefix in self._citation_command_prefixes
+        )
+        return next_is_bracket or is_double_backslash or is_citation
 
     def _should_skip_paragraph_split(
         self,
@@ -458,7 +460,7 @@ class ParagraphSentenceMathChunkingStrategy:
         span_end: int,
         block_math_spans: list[_SpanRange],
     ) -> bool:
-        """Skip splitting when block math borders a continuing sentence."""
+        """Skip splitting when block math or soft wraps border a continuation."""
         prev_idx = self._find_prev_nonspace(text, sep_start - 1, span_start)
         next_idx = self._find_next_nonspace(text, sep_end, span_end)
         if prev_idx is None or next_idx is None:
@@ -476,12 +478,54 @@ class ParagraphSentenceMathChunkingStrategy:
             lower_bound=span_start,
             spans=block_math_spans,
         )
-        if not (prev_inside_block or next_inside_block):
+        block_glue = False
+        if prev_inside_block or next_inside_block:
+            prev_sentence_end = self._is_sentence_end(text, prev_idx)
+            next_continuation = self._is_sentence_continuation(text, next_idx)
+            block_glue = (not prev_sentence_end) or next_continuation
+
+        return block_glue or self._is_soft_wrap_break(text, prev_idx, next_idx)
+
+    def _is_soft_wrap_break(self, text: str, prev_idx: int, next_idx: int) -> bool:
+        """Return True if a paragraph break looks like a hard-wrapped line."""
+        if text[next_idx] == "#":
             return False
+
+        end_idx = self._normalize_sentence_end_index(text, prev_idx)
+        if end_idx < 0:
+            return False
+
+        prev_char = text[end_idx]
+        next_char = text[next_idx]
+        looks_wrapped = (
+            self._ends_with_abbreviation(text, end_idx)
+            or prev_char in ":;,([{"  # punctuation/brackets that imply continuation
+            or (prev_char == "-" and next_char.islower())
+        )
+        if looks_wrapped:
+            return True
 
         prev_sentence_end = self._is_sentence_end(text, prev_idx)
         next_continuation = self._is_sentence_continuation(text, next_idx)
-        return (not prev_sentence_end) or next_continuation
+        return (not prev_sentence_end) and (next_continuation or next_char.islower())
+
+    @staticmethod
+    def _normalize_sentence_end_index(text: str, index: int) -> int:
+        """Return the index of trailing punctuation before quotes/brackets."""
+        cursor = index
+        while cursor >= 0 and text[cursor].isspace():
+            cursor -= 1
+        while cursor >= 0 and text[cursor] in "\"')]}":
+            cursor -= 1
+        return cursor
+
+    def _ends_with_abbreviation(self, text: str, punct_index: int) -> bool:
+        """Return True if the punctuation ends a known abbreviation."""
+        if punct_index < 0:
+            return False
+        window_start = max(0, punct_index - 8)
+        snippet = text[window_start : punct_index + 1]
+        return bool(self._abbreviation_pattern.search(snippet))
 
     @staticmethod
     def _pack_units_into_windows(
@@ -533,6 +577,48 @@ class ParagraphSentenceMathChunkingStrategy:
         """Return True when the span contains only whitespace."""
         return not text[span.start : span.end].strip()
 
+    def _merge_small_chunk_spans(
+        self,
+        spans: list[_SpanRange],
+        *,
+        token_offsets: TokenOffsets,
+    ) -> list[_SpanRange]:
+        """Merge chunks that are below the minimum token threshold."""
+        if not spans:
+            return []
+
+        merged: list[_SpanRange] = []
+        index = 0
+        total = len(spans)
+
+        while index < total:
+            span = spans[index]
+            token_count = token_offsets.count_tokens_from_span(
+                span.start,
+                span.end,
+            )
+            is_small = token_count < self._min_chunk_tokens and total > 1
+
+            if not is_small:
+                merged.append(span)
+                index += 1
+                continue
+
+            if index + 1 < total:
+                next_span = spans[index + 1]
+                spans[index + 1] = _SpanRange(span.start, next_span.end)
+                index += 1
+                continue
+
+            if merged:
+                prev = merged.pop()
+                merged.append(_SpanRange(prev.start, span.end))
+            else:
+                merged.append(span)
+            index += 1
+
+        return merged
+
 
 # -----------------------------
 # Main chunker
@@ -548,6 +634,7 @@ class MarkdownChunker:
         embedding_model_name: str = CHUNKING_SETTINGS.embedding_model_name,
         max_tokens: int = CHUNKING_SETTINGS.max_tokens,
         overlap_tokens: int = CHUNKING_SETTINGS.overlap_tokens,
+        min_chunk_tokens: int = CHUNKING_SETTINGS.min_chunk_tokens,
         header_pattern: re.Pattern = CHUNKING_SETTINGS.header_patterns,
         drop_section_title_prefixes: tuple[
             str,
@@ -558,6 +645,7 @@ class MarkdownChunker:
         """Initialize a chunker with tokenizer, limits, and strategy."""
         self._max_tokens = max_tokens
         self._overlap_tokens = overlap_tokens
+        self._min_chunk_tokens = min_chunk_tokens
         self._header_pattern = header_pattern
         self._drop_section_prefixes = tuple(
             self._normalize_heading_title(prefix)
@@ -593,6 +681,7 @@ class MarkdownChunker:
     ) -> None:
         """Build section nodes for each document based on headings."""
         base_metadata = dict(metadata) if metadata else None
+        min_chunk_tokens = self._min_chunk_tokens
         for document in documents:
             markdown_text = document.text
             token_offsets = self._embedding_service.tokenize_with_offsets_mapping(
@@ -607,6 +696,7 @@ class MarkdownChunker:
 
             stack: list[_SectionStackEntry] = []
             drop_level: int | None = None
+            carry_text = ""
 
             for heading, next_heading in zip(
                 headings,
@@ -615,21 +705,20 @@ class MarkdownChunker:
             ):
                 if drop_level is not None and heading.level <= drop_level:
                     drop_level = None
-                if drop_level is not None:
-                    continue
-                if self._should_drop_heading(heading.title):
-                    drop_level = heading.level
+                drop_current = self._should_drop_heading(heading.title)
+                if drop_level is not None or drop_current:
+                    drop_level = heading.level if drop_current else drop_level
                     continue
 
-                next_start = (
-                    next_heading.start
-                    if next_heading is not None
-                    else len(markdown_text)
-                )
+                next_start = next_heading.start if next_heading else len(markdown_text)
                 section_span = self._trim_whitespace_span(
                     markdown_text,
                     heading.end,
                     next_start,
+                )
+                raw_text = markdown_text[section_span.start : section_span.end]
+                combined_text = "\n".join(
+                    part for part in (carry_text, raw_text) if part
                 )
 
                 while stack and stack[-1].level >= heading.level:
@@ -648,14 +737,45 @@ class MarkdownChunker:
                     base_metadata=base_metadata,
                 )
 
-                self._assign_or_split_section_text(
-                    node=node,
-                    full_text=markdown_text,
-                    span_start=section_span.start,
-                    span_end=section_span.end,
-                    token_offsets=token_offsets,
-                    base_metadata=base_metadata,
+                has_next_heading = next_heading is not None
+                if carry_text:
+                    combined_offsets = (
+                        self._embedding_service.tokenize_with_offsets_mapping(
+                            combined_text,
+                        )
+                    )
+                    span_start, span_end = 0, len(combined_text)
+                    full_text = combined_text
+                else:
+                    combined_offsets = token_offsets
+                    span_start, span_end = section_span.start, section_span.end
+                    full_text = markdown_text
+
+                span_length = span_end - span_start
+                combined_token_count = (
+                    combined_offsets.count_tokens_from_span(span_start, span_end)
+                    if span_length > 0
+                    else 0
                 )
+                should_carry = (
+                    has_next_heading
+                    and min_chunk_tokens > 0
+                    and combined_text
+                    and combined_token_count < min_chunk_tokens
+                )
+                if should_carry:
+                    carry_text = combined_text
+                    node.text = ""
+                else:
+                    self._assign_or_split_section_text(
+                        node=node,
+                        full_text=full_text,
+                        span_start=span_start,
+                        span_end=span_end,
+                        token_offsets=combined_offsets,
+                        base_metadata=base_metadata,
+                    )
+                    carry_text = ""
                 document.children.append(node)
 
                 stack.append(_SectionStackEntry(heading.level, node, path))
@@ -686,10 +806,10 @@ class MarkdownChunker:
     def _should_drop_heading(self, title: str) -> bool:
         """Return True for reference/acknowledgement-like sections."""
         normalized = self._normalize_heading_title(title)
-        for prefix in self._drop_section_prefixes:
-            if normalized == prefix or normalized.startswith(f"{prefix} "):
-                return True
-        return False
+        return any(
+            normalized == prefix or normalized.startswith(f"{prefix} ")
+            for prefix in self._drop_section_prefixes
+        )
 
     @staticmethod
     def _trim_whitespace_span(text: str, start: int, end: int) -> _SpanRange:
