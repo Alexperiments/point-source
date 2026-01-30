@@ -45,6 +45,20 @@ class ChunkingSettings(BaseSettings):
         r"[.!?]+[\"')\]]*(?:\s+|$)",
         re.MULTILINE,
     )
+    drop_section_title_prefixes: tuple[str, ...] = (
+        "references",
+        "reference list",
+        "list of references",
+        "bibliography",
+        "works cited",
+        "citations",
+        "acknowledgements",
+        "acknowledgments",
+        "acknowledgement",
+        "acknowledgment",
+        "thanks",
+        "thank you",
+    )
     citation_command_prefixes: tuple[str, ...] = (
         "\\cite",
         "\\citet",
