@@ -31,7 +31,6 @@ async def main() -> None:
             .filter(lambda row: (category in row["id"]) & (len(row["text"]) >= 1000))
             .remove_columns(["source", "format"])
             .rename_column("id", "source_id")
-            .take(1000)
         )
 
         async with async_session() as session:
