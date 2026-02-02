@@ -6,6 +6,7 @@ from functools import cache
 
 import logfire
 import numpy as np
+import torch
 from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import BatchEncoding
@@ -23,7 +24,9 @@ Offset = tuple[int, int]
 @cache
 def get_embedding_model(name: str) -> SentenceTransformer:
     """Returns and caches the embedding model specified by the input name."""
-    return SentenceTransformer(name)
+    model = SentenceTransformer(name)
+    model.eval()
+    return model
 
 
 @cache
@@ -81,9 +84,29 @@ class EmbeddingService:
         """Tokenizer."""
         return get_tokenizer(self.embedding_model_name)
 
-    def encode(self, text_list: list[str]) -> np.ndarray:
+    def encode(
+        self,
+        text_list: list[str],
+        *,
+        batch_size: int,
+        normalize_embeddings: bool = False,
+    ) -> np.ndarray:
         """Embed the input list of strings with the embedding model."""
-        return self.embedding_model.encode(text_list)
+        model = self.embedding_model
+        kwargs: dict[str, object] = {
+            "convert_to_numpy": True,
+            "normalize_embeddings": normalize_embeddings,
+        }
+        if batch_size is not None:
+            kwargs["batch_size"] = batch_size
+
+        with torch.inference_mode():
+            return model.encode(
+                text_list,
+                convert_to_numpy=True,
+                normalize_embeddings=normalize_embeddings,
+                batch_size=batch_size,
+            )
 
     def tokenize(self, text: str) -> BatchEncoding:
         """Tokenize the input string with tokenizer."""

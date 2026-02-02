@@ -1,8 +1,6 @@
-# point-source
+# point-source [WIP]
 
 A RAG (Retrieval-Augmented Generation) tool for querying astrophysics papers from ArXiv.
-
-**Current Status:** Early development. Focused on data modeling and vector schema.
 
 ## The Stack
 
@@ -22,8 +20,10 @@ Most RAG projects rely on high-level wrappers like LangChain. This project inten
 
 * [x] Initial Scaffolding
 * [x] Data Modeling (Current focus)
-* [ ] ArXiv PDF Parsers (Handling LaTeX/Math) (skipping for now)
-* [ ] Chunking & Embedding logic
+* [ ] ~~ArXiv PDF Parsers (Handling LaTeX/Math) (skipping for now)~~
+* [x] Chunking with token-aware hierarchical splitter, math-citation-aware
+* [x] Embedding benchmark (evaluation dataset + metrics)
+* [ ] Create embeddings
 * [ ] Vector Search Implementation
 * [ ] Generation & Attribution
 * [ ] CLI & Web UI

@@ -197,5 +197,5 @@ cython_debug/
 #.idea/
 
 # (TODO:remove this) Files used during development
+evaluation/embedding/datasets/**/documents.jsonl
 project_structure_details.md
-src/core/database/test_database_ops.py

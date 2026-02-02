@@ -47,10 +47,11 @@ dev = [
     "types-python-jose>=3.5.0.20250531",
     "pydantic-evals[logfire]>=1.16.0",
     "transformers>=4.57.6",
+    "numpy>=2.4.1",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["src", "evaluation"]
 
 [build-system]
 requires = ["hatchling"]
