@@ -1,15 +1,9 @@
 """Embedding service."""
 
-from functools import cache
-from typing import Any, Literal
-
 import logfire
 import mlx.core as mx
 import numpy as np
-import torch
 from mlx_lm import load
-from pydantic import BaseModel, ConfigDict, Field
-from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer
 
 from src.core.chunking_config import CHUNKING_SETTINGS
@@ -20,103 +14,6 @@ embedded_chunks_metric = logfire.metric_counter(
     unit="1",
     description="Number of embedded chunks.",
 )
-
-
-class SentenceTransformerConfig(BaseModel):
-    """Configuration for sentence-transformers model and tokenizer kwargs."""
-
-    model_config = ConfigDict(frozen=True)
-
-    model_kwargs: dict[str, Any] = Field(default_factory=dict)
-    tokenizer_kwargs: dict[str, Any] = Field(default_factory=dict)
-    prompts: dict[str, str] = Field(
-        default_factory=dict,
-        description="Prefixes to add in front of the 'query' or the 'document'",
-    )
-
-
-_SENTENCE_TRANSFORMER_KWARGS: dict[str, SentenceTransformerConfig] = {
-    "Qwen/Qwen3-Embedding-0.6B": SentenceTransformerConfig(
-        model_kwargs={"attn_implementation": "eager"},
-        tokenizer_kwargs={"padding_side": "left"},
-        prompts={
-            "query": "Given a web search query, retrieve relevant passages that answer the query:",
-            "document": "",
-        },
-    ),
-}
-
-
-@cache
-def get_embedding_model(
-    name: str,
-    device: Literal["cpu", "mps", "cuda"] = "cpu",
-) -> SentenceTransformer:
-    """Returns and caches the embedding model specified by the input name."""
-    config = _SENTENCE_TRANSFORMER_KWARGS.get(
-        name,
-        SentenceTransformerConfig(),
-    )
-    model = SentenceTransformer(
-        name,
-        device=device,
-        model_kwargs=config.model_kwargs,
-        tokenizer_kwargs=config.tokenizer_kwargs,
-        prompts=config.prompts,
-    )
-    model.eval()
-
-    if device in {"cuda", "mps"}:
-        model = model.half()
-
-    logfire.info(
-        f"{name} model loaded in {device} with {next(model.parameters()).dtype} weights",
-    )
-    return model
-
-
-class SentenceTransformerEmbeddingService:
-    """Embedding service that exposes embedding utilities."""
-
-    def __init__(
-        self,
-        *,
-        embedding_model_name: str,
-        device: Literal["cpu", "cuda", "mps"] = "cpu",
-    ) -> None:
-        """Configure the embedding model name and device."""
-        self.embedding_model_name = embedding_model_name
-        self.device = device
-
-    @property
-    def embedding_model(self) -> SentenceTransformer:
-        """Embedding model."""
-        return get_embedding_model(self.embedding_model_name, self.device)
-
-    def _encode(
-        self,
-        text_list: list[str],
-        *,
-        batch_size: int,
-        prompt_name: str | None = None,
-        normalize_embeddings: bool = True,
-    ) -> np.ndarray:
-        """Embed the input list of strings with the embedding model."""
-        with torch.inference_mode():
-            return self.embedding_model.encode(
-                sentences=text_list,
-                prompt_name=prompt_name,
-                normalize_embeddings=normalize_embeddings,
-                batch_size=batch_size,
-            )
-
-    def encode_query(self, text_list: list[str], batch_size: int = 8) -> np.ndarray:
-        """Embed the input list of queries with the embedding model."""
-        return self._encode(text_list, batch_size=batch_size, prompt_name="query")
-
-    def encode_document(self, text_list: list[str], batch_size: int = 8) -> np.ndarray:
-        """Embed the input list of documents with the embedding model."""
-        return self._encode(text_list, batch_size=batch_size, prompt_name="document")
 
 
 class MLXQwen3EmbeddingService:
