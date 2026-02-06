@@ -198,6 +198,7 @@ Supplementary:
 - e5-large-v2
 - gte-large-en-v1.5
 - bai-bge-m3
+- text-embedding-3-small
 
 ## Storage layout (new tables)
 
@@ -244,11 +245,12 @@ Below is a **compact markdown summary table** followed by a **short interpretive
 
 | Model                    | Recall@50 | Recall@100 | Recall@200 | nDCG@10   | MRR       | p95 Latency (ms) |
 | ------------------------ | --------- | ---------- | ---------- | --------- | --------- | ---------------- |
-| **qwen3_embedding_0_6b** | **0.485** | **0.608**  | **0.722**  | **0.227** | **0.564** | 173              |
-| embeddinggemma_300m      | 0.399     | 0.550      | 0.674      | 0.188     | 0.494     | 80               |
-| e5_large_v2              | 0.398     | 0.524      | 0.669      | 0.169     | 0.507     | **61**           |
-| gte_large_en_v1_5        | 0.443     | 0.558      | 0.694      | 0.207     | 0.551     | 60               |
-| bge_m3                   | 0.458     | 0.562      | 0.699      | 0.145     | 0.509     | 60               |
+| **qwen3_embedding_0_6b** | **0.532** | **0.625**  | **0.762**  | **0.220** | 0.571     | 173              |
+| embeddinggemma_300m      | 0.440     | 0.574      | 0.681      | 0.206     | 0.572     | 80               |
+| e5_large_v2              | 0.398     | 0.524      | 0.669      | 0.169     | 0.507     | 61               |
+| gte_large_en_v1_5        | 0.443     | 0.558      | 0.694      | 0.207     | 0.551     | **60**           |
+| bge_m3                   | 0.458     | 0.562      | 0.699      | 0.145     | 0.509     | **60**           |
+| text-embedding-3-small   | 0.493     | 0.600      | 0.718      | 0.182     | **0.611** | 713              |
 
 ---
 
@@ -257,10 +259,40 @@ Below is a **compact markdown summary table** followed by a **short interpretive
 * **Best overall retrieval quality:** `qwen3_embedding_0_6b`
 
   * Highest Recall@50 / @100 / @200
-  * Best nDCG@10 and MRR
-  * Trade-off: noticeably higher p95 latency
+  * Best nDCG@10
+
+* **Best early recovery:** `text-embedding-3-small`
+  * Highest MRR
 
 * **Fastest models:** `e5_large_v2`, `bge_m3`, `gte_large_en_v1_5`
 
   * p95 ≈ 60 ms
   * Clear recall/ranking gap vs Qwen
+
+
+# Latency and optimizations
+After testing the latency on real-chunks embeddings it's clear that running the embedding locally for the current corpus is unfeasible (for ca. 850k chunks it would take few days of compute and results sometimes in crashes).
+It's necessary to find light-weighted versions of the chosen embedding model. Best bet is to work with an optimized version for Apple silicon (MLX).
+
+- **Models compared**
+  - Full-precision **Qwen3-Embedding-0.6B** (SentenceTransformer, PyTorch)
+  - **Qwen3-Embedding-0.6B-4bit-DWQ** (MLX, Apple Silicon)
+
+- **Correctness**
+  - Output dimensionality: **1024**
+  - Ranking preservation (Spearman ρ): **0.98**
+  - Conclusion: quantized embeddings preserve relative similarities extremely well
+
+- **Latency (end-to-end, 32 sentences × 256 tokens)**
+  - Full precision: **~5.0 s**
+  - 4-bit DWQ: **~2.5 s**
+  - Speedup: **~2×**
+
+- **Memory footprint**
+  - 4-bit DWQ (MLX): **~0.4 GB peak memory**
+  - Full precision: **significantly higher (>1 GB typical)**
+  - Quantization substantially reduces memory usage, improving deployability on resource-constrained systems
+
+- **Overall**
+  - Quantization yields a **significant latency reduction** with **negligible impact on embedding quality**
+  - Suitable for production retrieval and similarity search workloads

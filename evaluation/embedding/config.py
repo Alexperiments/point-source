@@ -50,7 +50,7 @@ EMBEDDING_MODEL_SPECS: tuple[EmbeddingModelSpec, ...] = (
         model_name="text-embedding-3-small",
         dimension=1536,
         provider="openai",
-        enabled=False,
+        enabled=True,
     ),
     EmbeddingModelSpec(
         key="voyage_3_5",

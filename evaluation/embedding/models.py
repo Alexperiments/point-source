@@ -100,6 +100,7 @@ class EmbeddingEvalPairMetric(Base):
     __tablename__ = "pair_metrics"
     __table_args__ = (
         UniqueConstraint(
+            "dataset_name",
             "run_name",
             "model_name",
             "quantization",
