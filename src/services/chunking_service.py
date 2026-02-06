@@ -11,7 +11,7 @@ import logfire
 
 from src.core.chunking_config import CHUNKING_SETTINGS
 from src.models.node import DocumentNode, TextNode
-from src.services.embedding_service import EmbeddingService, TokenOffsets
+from src.services.tokenization_service import TokenizerService, TokenOffsets
 
 
 @dataclass(frozen=True, slots=True)
@@ -520,8 +520,8 @@ class MarkdownChunker:
         self._strategy = strategy or ParagraphSentenceMathChunkingStrategy()
         self._strategy_name = type(self._strategy).__name__
         self._tokenizer_name = embedding_model_name
-        self._embedding_service = EmbeddingService(
-            embedding_model_name=embedding_model_name,
+        self._tokenizer_service = TokenizerService(
+            model_name=embedding_model_name,
         )
 
     @logfire.instrument("chunking_service.chunk", extract_args=False)
@@ -546,7 +546,7 @@ class MarkdownChunker:
 
         for doc in documents:
             text = doc.text
-            offsets = self._embedding_service.tokenize_with_offsets_mapping(text)
+            offsets = self._tokenizer_service.tokenize_with_offsets_mapping(text)
             headings = self._extract_headings(text)
             if not headings:
                 raise ValueError(f"Headers not detected for document ID: {doc.id}")
@@ -599,7 +599,7 @@ class MarkdownChunker:
                         full_text = combined
                         span = _Span(0, len(combined))
                         span_offsets = (
-                            self._embedding_service.tokenize_with_offsets_mapping(
+                            self._tokenizer_service.tokenize_with_offsets_mapping(
                                 combined,
                             )
                         )

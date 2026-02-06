@@ -1,15 +1,31 @@
 """Protocols."""
 
-from typing import Protocol
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Protocol
 
 
-class PydanticBaseModelProtocol(Protocol):
-    """Pydantic BaseModel protocol, to avoid circular dependencies between ORM layer and app layer."""
+if TYPE_CHECKING:
+    import numpy as np
 
-    def model_dump(self) -> dict[str, object]:
-        """Generate a dictionary representation of the model, optionally specifying which fields to include or exclude."""
+    from src.services.tokenization_service import TokenOffsets
+
+
+class EmbeddingService(Protocol):
+    """Embedding service protocol."""
+
+    def encode_query(self, text_list: list[str], batch_size: int) -> np.ndarray:
+        """Embed the input list of queries with the embedding model."""
+        ...
+
+    def encode_document(self, text_list: list[str], batch_size: int) -> np.ndarray:
+        """Embed the input list of documents with the embedding model."""
         ...
 
 
-class ORMBaseNodeProtocol(Protocol):
-    """ORM BaseNode protocol, to avoid circular dependencies between ORM layer and app layer."""
+class TokenizerService(Protocol):
+    """Tokenizer service protocol."""
+
+    def tokenize_with_offsets_mapping(self, text: str) -> TokenOffsets:
+        """Tokenize the input string returning an offsets mapping."""
+        ...

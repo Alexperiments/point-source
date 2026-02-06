@@ -1,15 +1,18 @@
-"""Embedding and tokenizer service."""
+"""Embedding service."""
 
-from bisect import bisect_left, bisect_right
-from dataclasses import dataclass
 from functools import cache
+from typing import Any, Literal
 
 import logfire
+import mlx.core as mx
 import numpy as np
 import torch
+from mlx_lm import load
+from pydantic import BaseModel, ConfigDict, Field
 from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer
-from transformers.tokenization_utils_base import BatchEncoding
+
+from src.core.chunking_config import CHUNKING_SETTINGS
 
 
 embedded_chunks_metric = logfire.metric_counter(
@@ -18,102 +21,177 @@ embedded_chunks_metric = logfire.metric_counter(
     description="Number of embedded chunks.",
 )
 
-Offset = tuple[int, int]
+
+class SentenceTransformerConfig(BaseModel):
+    """Configuration for sentence-transformers model and tokenizer kwargs."""
+
+    model_config = ConfigDict(frozen=True)
+
+    model_kwargs: dict[str, Any] = Field(default_factory=dict)
+    tokenizer_kwargs: dict[str, Any] = Field(default_factory=dict)
+    prompts: dict[str, str] = Field(
+        default_factory=dict,
+        description="Prefixes to add in front of the 'query' or the 'document'",
+    )
+
+
+_SENTENCE_TRANSFORMER_KWARGS: dict[str, SentenceTransformerConfig] = {
+    "Qwen/Qwen3-Embedding-0.6B": SentenceTransformerConfig(
+        model_kwargs={"attn_implementation": "eager"},
+        tokenizer_kwargs={"padding_side": "left"},
+        prompts={
+            "query": "Given a web search query, retrieve relevant passages that answer the query:",
+            "document": "",
+        },
+    ),
+}
 
 
 @cache
-def get_embedding_model(name: str) -> SentenceTransformer:
+def get_embedding_model(
+    name: str,
+    device: Literal["cpu", "mps", "cuda"] = "cpu",
+) -> SentenceTransformer:
     """Returns and caches the embedding model specified by the input name."""
-    model = SentenceTransformer(name)
+    config = _SENTENCE_TRANSFORMER_KWARGS.get(
+        name,
+        SentenceTransformerConfig(),
+    )
+    model = SentenceTransformer(
+        name,
+        device=device,
+        model_kwargs=config.model_kwargs,
+        tokenizer_kwargs=config.tokenizer_kwargs,
+        prompts=config.prompts,
+    )
     model.eval()
+
+    if device in {"cuda", "mps"}:
+        model = model.half()
+
+    logfire.info(
+        f"{name} model loaded in {device} with {next(model.parameters()).dtype} weights",
+    )
     return model
 
 
-@cache
-def get_tokenizer(name: str):  # noqa: ANN201
-    """Returns and caches tokenizer related to the model specified by the input name."""
-    return AutoTokenizer.from_pretrained(name, use_fast=True)
+class SentenceTransformerEmbeddingService:
+    """Embedding service that exposes embedding utilities."""
 
-
-@dataclass(frozen=True, slots=True)
-class TokenOffsets:
-    """Token-to-character offsets for a specific text.
-
-    offsets[i] = (char_start, char_end) for token i.
-    starts/ends are cached for fast bisect span->token span lookup.
-    """
-
-    offsets: list[Offset]
-    starts: list[int]
-    ends: list[int]
-
-    @classmethod
-    def from_offsets_mapping(cls, offsets: list[Offset]) -> "TokenOffsets":
-        """Build TokenOffsets with cached start/end arrays for fast lookup."""
-        return cls(
-            offsets=offsets,
-            starts=[start for start, _ in offsets],
-            ends=[end for _, end in offsets],
-        )
-
-    def count_tokens_from_span(self, span_start: int, span_end: int) -> int:
-        """Return the token span [start, end) overlapping the char span."""
-        if span_start >= span_end:
-            raise ValueError("Span start must be smaller than span end!")
-
-        start_token = bisect_right(self.ends, span_start)
-        end_token = bisect_left(self.starts, span_end)
-        end_token = max(end_token, start_token)
-        return end_token - start_token
-
-
-class EmbeddingService:
-    """Embedding service. Provides embedding and tokenization utilities."""
-
-    def __init__(self, *, embedding_model_name: str) -> None:
-        """Default constructor."""
+    def __init__(
+        self,
+        *,
+        embedding_model_name: str,
+        device: Literal["cpu", "cuda", "mps"] = "cpu",
+    ) -> None:
+        """Configure the embedding model name and device."""
         self.embedding_model_name = embedding_model_name
+        self.device = device
 
     @property
     def embedding_model(self) -> SentenceTransformer:
         """Embedding model."""
-        return get_embedding_model(self.embedding_model_name)
+        return get_embedding_model(self.embedding_model_name, self.device)
 
-    @property
-    def tokenizer(self):  # noqa: ANN201
-        """Tokenizer."""
-        return get_tokenizer(self.embedding_model_name)
-
-    def encode(
+    def _encode(
         self,
         text_list: list[str],
         *,
         batch_size: int,
-        normalize_embeddings: bool = False,
+        prompt_name: str | None = None,
+        normalize_embeddings: bool = True,
     ) -> np.ndarray:
         """Embed the input list of strings with the embedding model."""
-        model = self.embedding_model
-        kwargs: dict[str, object] = {
-            "convert_to_numpy": True,
-            "normalize_embeddings": normalize_embeddings,
-        }
-        if batch_size is not None:
-            kwargs["batch_size"] = batch_size
-
         with torch.inference_mode():
-            return model.encode(
-                text_list,
-                convert_to_numpy=True,
+            return self.embedding_model.encode(
+                sentences=text_list,
+                prompt_name=prompt_name,
                 normalize_embeddings=normalize_embeddings,
                 batch_size=batch_size,
             )
 
-    def tokenize(self, text: str) -> BatchEncoding:
-        """Tokenize the input string with tokenizer."""
-        return self.tokenizer(text)
+    def encode_query(self, text_list: list[str], batch_size: int = 8) -> np.ndarray:
+        """Embed the input list of queries with the embedding model."""
+        return self._encode(text_list, batch_size=batch_size, prompt_name="query")
 
-    def tokenize_with_offsets_mapping(self, text: str) -> TokenOffsets:
-        """Tokenize the input string returning an offsets mapping."""
-        encoded = self.tokenizer(text, return_offsets_mapping=True)
-        offsets_mapping = encoded["offset_mapping"]
-        return TokenOffsets.from_offsets_mapping(offsets=offsets_mapping)
+    def encode_document(self, text_list: list[str], batch_size: int = 8) -> np.ndarray:
+        """Embed the input list of documents with the embedding model."""
+        return self._encode(text_list, batch_size=batch_size, prompt_name="document")
+
+
+class MLXQwen3EmbeddingService:
+    """Embedding service backed by MLX for Qwen3 models."""
+
+    def __init__(self) -> None:
+        """Initialize the MLX model, tokenizer, and query instruction."""
+        self.model_name = "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ"
+        self.model, _ = load(self.model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name,
+            trust_remote_code=True,
+            use_fast=True,
+        )
+        self.query_instruction = "Given a web search query, retrieve relevant passages that answer the query."
+
+    def _encode(
+        self,
+        text_list: list[str],
+        batch_size: int = 32,
+        max_length: int = CHUNKING_SETTINGS.max_tokens,
+    ) -> np.ndarray:
+        n = len(text_list)
+        dim = 1024
+
+        out = mx.zeros((n, dim), dtype=mx.float32)
+
+        for start in range(0, n, batch_size):
+            batch_texts = text_list[start : start + batch_size]
+
+            tokenizer_output = self.tokenizer(
+                batch_texts,
+                max_length=max_length,
+                padding=True,
+                truncation=True,
+                return_tensors="mlx",
+            )
+
+            input_ids = tokenizer_output["input_ids"]
+            attention_mask = tokenizer_output["attention_mask"]
+
+            hidden_states = self.model.model(input_ids)
+
+            seq_len = mx.sum(attention_mask, axis=1) - 1
+            idx = mx.maximum(seq_len, 0)
+
+            bsz = hidden_states.shape[0]
+            pooled = hidden_states[mx.arange(bsz), idx]
+
+            norm = mx.linalg.norm(pooled, axis=1, keepdims=True)
+            emb = pooled / mx.maximum(norm, 1e-9)
+
+            out[start : start + bsz] = emb
+
+            mx.eval(out)
+
+        return np.array(out.tolist(), dtype=np.float32)
+
+    def encode_document(
+        self,
+        text_list: list[str],
+        batch_size: int = 8,
+    ) -> np.ndarray:
+        """Embed documents using the MLX-backed Qwen3 model."""
+        return self._encode(text_list, batch_size)
+
+    def encode_query(
+        self,
+        text_list: list[str],
+        batch_size: int = 8,
+    ) -> np.ndarray:
+        """Embed queries using the MLX-backed Qwen3 model."""
+        prefixed = [f"Instruct: {self.query_instruction}\nQuery: " for t in text_list]
+        return self._encode(
+            prefixed,
+            batch_size=batch_size,
+            max_length=CHUNKING_SETTINGS.max_tokens + 15,
+        )
