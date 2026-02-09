@@ -22,7 +22,7 @@ class MainAgentDependencies:
 
 main_agent = Agent[MainAgentDependencies, str](
     name="Main Agent",
-    model=get_chat_model("gpt-5-mini", ModelSettings(temperature=0.3)),
+    model=get_chat_model("qwen3-4b-mlx-4bit", ModelSettings(temperature=0.3)),
     deps_type=MainAgentDependencies,
 )
 
