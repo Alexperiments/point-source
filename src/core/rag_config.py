@@ -1,4 +1,6 @@
-"""Chunking configuration settings."""
+"""RAG configuration settings."""
+
+from __future__ import annotations
 
 import os
 import re
@@ -24,7 +26,7 @@ class ChunkingSettings(BaseSettings):
         env_prefix="CHUNKING_",
     )
 
-    embedding_model_name: str = Field(default="Qwen/Qwen3-Embedding-0.6B")
+    tokenizer_model_name: str = Field(default="Qwen/Qwen3-Embedding-0.6B")
     max_tokens: int = Field(default=256)
     overlap_tokens: int = Field(default=0)
     min_chunk_chars: int = Field(default=20)
@@ -78,4 +80,69 @@ class ChunkingSettings(BaseSettings):
     )
 
 
+class EmbeddingSettings(BaseSettings):
+    """Configuration settings for embeddings."""
+
+    model_config = SettingsConfigDict(
+        env_file=env_file_path,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+        env_prefix="EMBEDDING_",
+    )
+
+    model_name: str = Field(
+        default="mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
+    )
+    max_tokens: int = Field(default=256)
+    query_batch_size: int = Field(default=8)
+    document_batch_size: int = Field(default=8)
+    query_instruction: str = Field(
+        default="Given a web search query, retrieve relevant passages that answer the query.",
+    )
+
+
+class RetrievalSettings(BaseSettings):
+    """Configuration settings for retrieval."""
+
+    model_config = SettingsConfigDict(
+        env_file=env_file_path,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+        env_prefix="RETRIEVAL_",
+    )
+
+    top_n: int = Field(default=5)
+    text_top_k: int = Field(default=50)
+    vector_top_k: int = Field(default=50)
+    rrf_k: int = Field(default=60)
+    semantic_weight: float = Field(default=0.7, ge=0.0, le=1.0)
+    text_weight: float = Field(default=0.3, ge=0.0, le=1.0)
+    use_prev_next: bool = Field(default=False)
+    max_merged_chars: int = Field(default=4000)
+    cache_prefix: str = Field(default="retrieval_cache:")
+    cache_ttl_seconds: int = Field(default=900)
+
+
+class RerankerSettings(BaseSettings):
+    """Configuration settings for re-ranking."""
+
+    model_config = SettingsConfigDict(
+        env_file=env_file_path,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+        env_prefix="RERANKER_",
+    )
+
+    enabled: bool = Field(default=True)
+    model_name: str = Field(default="mock-reranker")
+    top_k: int = Field(default=5)
+    batch_size: int = Field(default=8)
+
+
 CHUNKING_SETTINGS = ChunkingSettings()
+EMBEDDING_SETTINGS = EmbeddingSettings()
+RETRIEVAL_SETTINGS = RetrievalSettings()
+RERANKER_SETTINGS = RerankerSettings()

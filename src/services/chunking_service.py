@@ -9,7 +9,7 @@ from typing import Protocol
 
 import logfire
 
-from src.core.chunking_config import CHUNKING_SETTINGS
+from src.core.rag_config import CHUNKING_SETTINGS
 from src.models.node import DocumentNode, TextNode
 from src.services.tokenization_service import TokenizerService, TokenOffsets
 
@@ -497,7 +497,7 @@ class MarkdownChunker:
     def __init__(
         self,
         *,
-        embedding_model_name: str = CHUNKING_SETTINGS.embedding_model_name,
+        tokenizer_model_name: str = CHUNKING_SETTINGS.tokenizer_model_name,
         max_tokens: int = CHUNKING_SETTINGS.max_tokens,
         overlap_tokens: int = CHUNKING_SETTINGS.overlap_tokens,
         min_chunk_chars: int = CHUNKING_SETTINGS.min_chunk_chars,
@@ -519,9 +519,9 @@ class MarkdownChunker:
 
         self._strategy = strategy or ParagraphSentenceMathChunkingStrategy()
         self._strategy_name = type(self._strategy).__name__
-        self._tokenizer_name = embedding_model_name
+        self._tokenizer_name = tokenizer_model_name
         self._tokenizer_service = TokenizerService(
-            model_name=embedding_model_name,
+            model_name=tokenizer_model_name,
         )
 
     @logfire.instrument("chunking_service.chunk", extract_args=False)
