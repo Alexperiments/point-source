@@ -1,0 +1,27 @@
+{% extends "user_base.html" %}
+
+{% block content %}
+<section class="hero">
+    <h1>Welcome back</h1>
+    <p>Sign in to continue your conversation with the assistant.</p>
+</section>
+
+<div class="card grid">
+    {% if error %}
+        <div class="alert error">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="{{ request.url_for('web_login_submit') }}" class="grid">
+        <div>
+            <label for="email">Email</label>
+            <input id="email" type="email" name="email" required value="{{ email or '' }}" />
+        </div>
+        <div>
+            <label for="password">Password</label>
+            <input id="password" type="password" name="password" required />
+        </div>
+        <button class="btn" type="submit">Login</button>
+        <div class="muted">No account yet? <a href="{{ request.url_for('web_register') }}">Create one</a>.</div>
+    </form>
+</div>
+{% endblock %}

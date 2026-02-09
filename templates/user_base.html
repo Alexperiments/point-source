@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title or "App" }}</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+        :root {
+            --bg: #0f1320;
+            --bg-2: #12192b;
+            --card: #151f36;
+            --card-2: #192541;
+            --accent: #f4d35e;
+            --accent-2: #4fd1c5;
+            --text: #e6edf6;
+            --muted: #9aa7c7;
+            --danger: #ff6b6b;
+            --success: #36d399;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Space Grotesk", sans-serif;
+            color: var(--text);
+            background: radial-gradient(1200px 800px at 15% 10%, #1a2340 0%, var(--bg) 55%),
+                        linear-gradient(135deg, #0f1320 0%, #0b0f1b 100%);
+            min-height: 100vh;
+        }
+
+        .shell {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 32px 20px 60px;
+        }
+
+        .nav {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 14px 18px;
+            background: rgba(21, 31, 54, 0.8);
+            border: 1px solid rgba(154, 167, 199, 0.15);
+            border-radius: 14px;
+            backdrop-filter: blur(8px);
+            margin-bottom: 28px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+        }
+
+        .brand-badge {
+            width: 36px;
+            height: 36px;
+            display: grid;
+            place-items: center;
+            border-radius: 10px;
+            background: linear-gradient(135deg, var(--accent), #f7b733);
+            color: #161616;
+            font-weight: 700;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 12px;
+        }
+
+        .nav a,
+        .nav button {
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            padding: 8px 14px;
+            border-radius: 999px;
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--text);
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+
+        .nav a:hover,
+        .nav button:hover {
+            border-color: rgba(244, 211, 94, 0.6);
+            color: var(--accent);
+        }
+
+        .hero {
+            display: grid;
+            gap: 14px;
+            margin-bottom: 26px;
+        }
+
+        .hero h1 {
+            font-size: clamp(2rem, 3vw, 3rem);
+            margin: 0;
+        }
+
+        .hero p {
+            margin: 0;
+            color: var(--muted);
+            max-width: 680px;
+            line-height: 1.5;
+        }
+
+        .card {
+            background: linear-gradient(145deg, rgba(21, 31, 54, 0.95), rgba(25, 37, 65, 0.95));
+            border: 1px solid rgba(154, 167, 199, 0.18);
+            border-radius: 18px;
+            padding: 26px;
+            box-shadow: 0 20px 40px rgba(3, 5, 12, 0.45);
+        }
+
+        .grid {
+            display: grid;
+            gap: 18px;
+        }
+
+        label {
+            font-size: 0.9rem;
+            color: var(--muted);
+            margin-bottom: 6px;
+            display: block;
+        }
+
+        input,
+        textarea {
+            width: 100%;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(154, 167, 199, 0.2);
+            background: rgba(15, 19, 32, 0.7);
+            color: var(--text);
+            font-size: 1rem;
+        }
+
+        textarea {
+            min-height: 160px;
+            resize: vertical;
+        }
+
+        .btn {
+            padding: 12px 18px;
+            border-radius: 12px;
+            border: none;
+            background: linear-gradient(135deg, var(--accent), #f4b266);
+            color: #141414;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 20px rgba(244, 211, 94, 0.2);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid rgba(154, 167, 199, 0.3);
+            color: var(--text);
+        }
+
+        .alert {
+            padding: 12px 14px;
+            border-radius: 12px;
+            font-size: 0.95rem;
+        }
+
+        .alert.error {
+            background: rgba(255, 107, 107, 0.15);
+            border: 1px solid rgba(255, 107, 107, 0.4);
+            color: #ffdada;
+        }
+
+        .alert.success {
+            background: rgba(54, 211, 153, 0.15);
+            border: 1px solid rgba(54, 211, 153, 0.4);
+            color: #d8fff2;
+        }
+
+        .chat-response {
+            background: rgba(15, 19, 32, 0.7);
+            border-radius: 16px;
+            padding: 18px;
+            border: 1px solid rgba(79, 209, 197, 0.4);
+            color: #d6fff7;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        .muted {
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+
+        @media (max-width: 720px) {
+            .nav {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .nav-links {
+                flex-wrap: wrap;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <nav class="nav">
+            <div class="brand">
+                <div class="brand-badge">PS</div>
+                <div>Point Source</div>
+            </div>
+            <div class="nav-links">
+                {% if current_user %}
+                    <a href="{{ request.url_for('web_chat') }}">Chat</a>
+                    <a href="{{ request.url_for('web_profile') }}">Profile</a>
+                    <form method="post" action="{{ request.url_for('web_logout') }}" style="margin:0;">
+                        <button type="submit">Logout</button>
+                    </form>
+                {% else %}
+                    <a href="{{ request.url_for('web_login') }}">Login</a>
+                    <a href="{{ request.url_for('web_register') }}">Register</a>
+                {% endif %}
+            </div>
+        </nav>
+
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>

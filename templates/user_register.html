@@ -1,0 +1,32 @@
+{% extends "user_base.html" %}
+
+{% block content %}
+<section class="hero">
+    <h1>Create your account</h1>
+    <p>Set up your profile to access the chat experience.</p>
+</section>
+
+<div class="card grid">
+    {% if error %}
+        <div class="alert error">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="{{ request.url_for('web_register_submit') }}" class="grid">
+        <div>
+            <label for="name">Name</label>
+            <input id="name" type="text" name="name" required value="{{ name or '' }}" />
+        </div>
+        <div>
+            <label for="email">Email</label>
+            <input id="email" type="email" name="email" required value="{{ email or '' }}" />
+        </div>
+        <div>
+            <label for="password">Password</label>
+            <input id="password" type="password" name="password" required />
+            <div class="muted">Must be at least 8 characters and include a number.</div>
+        </div>
+        <button class="btn" type="submit">Create account</button>
+        <div class="muted">Already have an account? <a href="{{ request.url_for('web_login') }}">Login</a>.</div>
+    </form>
+</div>
+{% endblock %}

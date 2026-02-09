@@ -1,0 +1,31 @@
+{% extends "user_base.html" %}
+
+{% block content %}
+<section class="hero">
+    <h1>Hello, {{ current_user.name }}</h1>
+    <p>Send a message and the agent will respond right here.</p>
+</section>
+
+<div class="grid">
+    <div class="card grid">
+        {% if error %}
+            <div class="alert error">{{ error }}</div>
+        {% endif %}
+
+        <form method="post" action="{{ request.url_for('web_chat_submit') }}" class="grid">
+            <div>
+                <label for="prompt">Your message</label>
+                <textarea id="prompt" name="prompt" placeholder="Ask anything...">{{ prompt or '' }}</textarea>
+            </div>
+            <button class="btn" type="submit">Send</button>
+        </form>
+    </div>
+
+    {% if response %}
+        <div class="card grid">
+            <div class="muted">Assistant response</div>
+            <div class="chat-response">{{ response }}</div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
