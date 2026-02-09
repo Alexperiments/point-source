@@ -68,7 +68,7 @@ class MLXQwen3EmbeddingService:
 
             out[start : start + bsz] = emb
 
-            mx.eval(out)
+        mx.eval(out)
 
         return np.array(out.tolist(), dtype=np.float32)
 
