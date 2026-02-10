@@ -81,48 +81,72 @@ class RetrievalService:
             include_neighbors=include_neighbors,
         )
 
-        cached = await self._get_cached(cache_key)
-        if cached is not None:
-            return cached
+        query_preview = normalized[:200]
+        filters_payload = (
+            filters.model_dump(mode="json", exclude_none=True) if filters else None
+        )
 
-        with logfire.span("retrieval.embed_query"):
-            embedding = self._embed_query(normalized)
+        with logfire.span(
+            "retrieval.retrieve",
+            query_preview=query_preview,
+            query_len=len(normalized),
+            include_neighbors=include_neighbors,
+            filters=filters_payload,
+        ):
+            cached = await self._get_cached(cache_key)
+            if cached is not None:
+                logfire.info(
+                    "retrieval.cache_hit",
+                    chunk_count=len(cached),
+                )
+                self._log_retrieved_chunks(cached)
+                return cached
 
-        with logfire.span("retrieval.text_search"):
-            text_rows = await self._text_candidates(normalized, filters)
+            with logfire.span("retrieval.embed_query"):
+                embedding = self._embed_query(normalized)
 
-        with logfire.span("retrieval.vector_search"):
-            vector_rows = await self._vector_candidates(embedding, filters)
+            with logfire.span("retrieval.text_search"):
+                text_rows = await self._text_candidates(normalized, filters)
 
-        with logfire.span("retrieval.rrf_merge"):
-            merged = self._rrf_merge(text_rows, vector_rows)
+            with logfire.span("retrieval.vector_search"):
+                vector_rows = await self._vector_candidates(embedding, filters)
 
-        with logfire.span("retrieval.rerank"):
-            reranked = self._mock_rerank(normalized, merged)
+            with logfire.span("retrieval.rrf_merge"):
+                merged = self._rrf_merge(text_rows, vector_rows)
 
-        reranked = reranked[: RETRIEVAL_SETTINGS.top_n]
+            with logfire.span("retrieval.rerank"):
+                reranked = self._mock_rerank(normalized, merged)
 
-        results = [
-            RetrievedChunk(
-                chunk_id=c.chunk_id,
-                document_id=c.document_id,
-                source_id=c.source_id,
-                path=c.path,
-                text=c.text,
-                text_rank=c.text_rank,
-                vector_rank=c.vector_rank,
-                rrf_score=c.rrf_score,
-                citations=[c.source_id],
+            reranked = reranked[: RETRIEVAL_SETTINGS.top_n]
+
+            results = [
+                RetrievedChunk(
+                    chunk_id=c.chunk_id,
+                    document_id=c.document_id,
+                    source_id=c.source_id,
+                    path=c.path,
+                    text=c.text,
+                    text_rank=c.text_rank,
+                    vector_rank=c.vector_rank,
+                    rrf_score=c.rrf_score,
+                    citations=[c.source_id],
+                )
+                for c in reranked
+            ]
+
+            if include_neighbors and results:
+                with logfire.span("retrieval.expand_context"):
+                    await self._expand_with_neighbors(results)
+
+            logfire.info(
+                "retrieval.results",
+                chunk_count=len(results),
+                cached=False,
             )
-            for c in reranked
-        ]
+            self._log_retrieved_chunks(results)
 
-        if include_neighbors and results:
-            with logfire.span("retrieval.expand_context"):
-                await self._expand_with_neighbors(results)
-
-        await self._set_cached(cache_key, results)
-        return results
+            await self._set_cached(cache_key, results)
+            return results
 
     @staticmethod
     def _normalize_query(query: str) -> str:
@@ -181,6 +205,19 @@ class RetrievalService:
             payload,
             ex=RETRIEVAL_SETTINGS.cache_ttl_seconds,
         )
+
+    @staticmethod
+    def _log_retrieved_chunks(results: list[RetrievedChunk]) -> None:
+        for idx, chunk in enumerate(results, start=1):
+            logfire.info(
+                "retrieval.chunk",
+                index=idx,
+                chunk_id=str(chunk.chunk_id),
+                document_id=str(chunk.document_id),
+                source_id=chunk.source_id,
+                path=chunk.path,
+                snippet=chunk.text_snippet,
+            )
 
     def _embed_query(self, query: str) -> list[float]:
         embedding = self._embedder.encode_query(
