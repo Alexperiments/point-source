@@ -142,7 +142,31 @@ class RerankerSettings(BaseSettings):
     batch_size: int = Field(default=8)
 
 
+class AgentSettings(BaseSettings):
+    """Configuration settings for the main agent."""
+
+    model_config = SettingsConfigDict(
+        env_file=env_file_path,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+        env_prefix="AGENT_",
+    )
+
+    name: str = Field(default="Main Agent")
+    model_name: str = Field(default="custom/qwen3-4b-mlx-4bit")
+    custom_llm_provider: str | None = Field(
+        default=None,
+        description="LiteLLM custom provider override for custom model routing.",
+    )
+    temperature: float = Field(default=0.3, ge=0.0)
+    max_tokens: int = Field(default=2048, ge=1)
+    enable_thinking: bool = Field(default=False)
+    instruction_slug: str = Field(default="main_agent_instructions")
+
+
 CHUNKING_SETTINGS = ChunkingSettings()
 EMBEDDING_SETTINGS = EmbeddingSettings()
 RETRIEVAL_SETTINGS = RetrievalSettings()
 RERANKER_SETTINGS = RerankerSettings()
+AGENT_SETTINGS = AgentSettings()
