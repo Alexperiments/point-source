@@ -3,6 +3,7 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+import logfire
 from fastapi import FastAPI
 from guard.middleware import SecurityMiddleware
 from guard.models import SecurityConfig
@@ -49,6 +50,12 @@ app = FastAPI(
     description=PROJECT_INFO["description"],
     lifespan=lifespan,
 )
+
+logfire.configure(
+    service_name=PROJECT_INFO["name"],
+    service_version=PROJECT_INFO["version"],
+)
+logfire.instrument_fastapi(app)
 
 app.add_middleware(
     SessionMiddleware,
