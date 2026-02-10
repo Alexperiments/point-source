@@ -1,7 +1,9 @@
 """Main agent."""
 
 from datetime import UTC, datetime
+from typing import Any
 
+import logfire
 from attr import dataclass
 from pydantic_ai import Agent, ModelSettings, RunContext
 from redis.asyncio import Redis
@@ -23,15 +25,26 @@ class MainAgentDependencies:
     redis: Redis
 
 
-DEFAULT_MODEL_SETTINGS = ModelSettings(
-    temperature=AGENT_SETTINGS.temperature,
-    max_tokens=AGENT_SETTINGS.max_tokens,
-    extra_body={
-        "chat_template_kwargs": {
-            "enable_thinking": AGENT_SETTINGS.enable_thinking,
-        },
-    },
-)
+_model_settings_kwargs = {
+    "temperature": AGENT_SETTINGS.temperature,
+    "max_tokens": AGENT_SETTINGS.max_tokens,
+}
+extra_body: dict[str, Any] = {}
+if AGENT_SETTINGS.enable_thinking:
+    extra_body.setdefault("chat_template_kwargs", {})["enable_thinking"] = (
+        AGENT_SETTINGS.enable_thinking
+    )
+
+custom_provider = AGENT_SETTINGS.custom_llm_provider
+if not custom_provider and AGENT_SETTINGS.model_name.startswith("custom/"):
+    custom_provider = "openai"
+if custom_provider:
+    extra_body["custom_llm_provider"] = custom_provider
+
+if extra_body:
+    _model_settings_kwargs["extra_body"] = extra_body
+
+DEFAULT_MODEL_SETTINGS = ModelSettings(**_model_settings_kwargs)
 
 main_agent = Agent[MainAgentDependencies, str](
     name=AGENT_SETTINGS.name,
@@ -65,8 +78,9 @@ async def retrieve_chunks(
 ) -> list[RetrievedChunk]:
     """Retrieve relevant document chunks for factual or research queries."""
     service = RetrievalService(session=ctx.deps.session, redis=ctx.deps.redis)
-    return await service.retrieve(
-        query=query,
-        filters=filters,
-        use_prev_next=use_prev_next,
-    )
+    with logfire.span("agent.tool.retrieve_chunks"):
+        return await service.retrieve(
+            query=query,
+            filters=filters,
+            use_prev_next=use_prev_next,
+        )
