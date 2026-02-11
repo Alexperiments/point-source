@@ -19,14 +19,21 @@ Most RAG projects rely on high-level wrappers like LangChain. This project inten
 ## Roadmap
 
 * [x] Initial Scaffolding
-* [x] Data Modeling (Current focus)
+* [x] Data Modeling
 * [ ] ~~ArXiv PDF Parsers (Handling LaTeX/Math) (skipping for now)~~
 * [x] Chunking with token-aware hierarchical splitter, math-citation-aware
 * [x] Embedding benchmark (evaluation dataset + metrics)
-* [ ] Create embeddings
-* [ ] Vector Search Implementation
-* [ ] Generation & Attribution
-* [ ] CLI & Web UI
+* [x] Create embeddings
+* [x] Vector Search Implementation
+* [x] Hybrid Search Implementation
+* [x] Generation & Attribution
+* [ ] CLI
+* [ ] Web UI
+
+## TODO and possible improvements
+- [ ] Allow the agent to evaluate the retrieved chunks and follow-up with a smart search to get more context from the retrieved papers (e.g. target the abstract or different sections that are cited in the retrieved chunk, to enrich the final result).
+- [ ] Implement re-ranking.
+- [ ] Improve agent latency.
 
 ## Setup & Usage
 
