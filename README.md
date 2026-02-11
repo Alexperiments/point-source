@@ -33,7 +33,10 @@ Most RAG projects rely on high-level wrappers like LangChain. This project inten
 ## TODO and possible improvements
 - [ ] Allow the agent to evaluate the retrieved chunks and follow-up with a smart search to get more context from the retrieved papers (e.g. target the abstract or different sections that are cited in the retrieved chunk, to enrich the final result).
 - [ ] Implement re-ranking.
-- [ ] Improve agent latency.
+- [x] Improve agent latency (improved it with a pydantic-ai warm-up, still slow. though.)
+- [ ] Clean and move the content of agent_chat.py in the main_agent, to handle stream, log results
+- [ ] Correctly wire the agent to web UI
+- [ ]
 
 ## Setup & Usage
 
