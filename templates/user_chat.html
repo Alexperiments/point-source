@@ -12,7 +12,9 @@
             <div class="alert error">{{ error }}</div>
         {% endif %}
 
-        <form method="post" action="{{ request.url_for('web_chat_submit') }}" class="grid">
+        <div class="alert error" id="stream-error" style="display:none;"></div>
+
+        <form method="post" action="{{ request.url_for('web_chat_submit') }}" class="grid" id="chat-form" data-stream-url="{{ request.url_for('web_chat_stream') }}">
             <div>
                 <label for="prompt">Your message</label>
                 <textarea id="prompt" name="prompt" placeholder="Ask anything...">{{ prompt or '' }}</textarea>
@@ -21,11 +23,114 @@
         </form>
     </div>
 
-    {% if response %}
-        <div class="card grid">
+    <div class="card grid" id="response-card" {% if not response %}style="display:none;"{% endif %}>
             <div class="muted">Assistant response</div>
-            <div class="chat-response">{{ response }}</div>
-        </div>
-    {% endif %}
+            <div class="chat-response" id="response-text">{{ response or "" }}</div>
+    </div>
 </div>
+
+<script>
+(() => {
+    const form = document.getElementById("chat-form");
+    if (!form || !window.fetch) {
+        return;
+    }
+    const streamUrl = form.dataset.streamUrl;
+    if (!streamUrl) {
+        return;
+    }
+
+    const promptField = form.querySelector("textarea[name='prompt']");
+    const responseCard = document.getElementById("response-card");
+    const responseText = document.getElementById("response-text");
+    const errorBox = document.getElementById("stream-error");
+    const submitBtn = form.querySelector("button[type='submit']");
+
+    const setError = (message) => {
+        if (!errorBox) return;
+        errorBox.textContent = message;
+        errorBox.style.display = message ? "block" : "none";
+    };
+
+    const setSubmitting = (isSubmitting) => {
+        if (!submitBtn) return;
+        submitBtn.disabled = isSubmitting;
+        submitBtn.textContent = isSubmitting ? "Streaming..." : "Send";
+    };
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        setError("");
+
+        const prompt = promptField ? promptField.value.trim() : "";
+        if (!prompt) {
+            setError("Please enter a message.");
+            return;
+        }
+
+        if (responseText) {
+            responseText.textContent = "";
+        }
+        if (responseCard) {
+            responseCard.style.display = "block";
+        }
+        setSubmitting(true);
+
+        const formData = new FormData(form);
+        try {
+            const response = await fetch(streamUrl, {
+                method: "POST",
+                body: formData,
+                headers: {
+                    "Accept": "text/event-stream",
+                },
+            });
+            if (!response.ok || !response.body) {
+                throw new Error("Unable to start streaming response.");
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+
+                let boundaryIndex = buffer.indexOf("\n\n");
+                while (boundaryIndex !== -1) {
+                    const rawEvent = buffer.slice(0, boundaryIndex);
+                    buffer = buffer.slice(boundaryIndex + 2);
+                    boundaryIndex = buffer.indexOf("\n\n");
+
+                    const lines = rawEvent.split("\n");
+                    for (const line of lines) {
+                        if (!line.startsWith("data:")) continue;
+                        const payloadText = line.slice(5).trim();
+                        if (!payloadText) continue;
+
+                        let payload;
+                        try {
+                            payload = JSON.parse(payloadText);
+                        } catch (err) {
+                            continue;
+                        }
+
+                        if (payload.type === "delta" && responseText) {
+                            responseText.textContent += payload.text || "";
+                        } else if (payload.type === "error") {
+                            setError(payload.message || "Streaming failed.");
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            setError(err?.message || "Streaming failed.");
+        } finally {
+            setSubmitting(false);
+        }
+    });
+})();
+</script>
 {% endblock %}

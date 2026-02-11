@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, status
 from pydantic import SecretStr, ValidationError
-from starlette.responses import RedirectResponse, Response
+from starlette.responses import RedirectResponse, Response, StreamingResponse
 from starlette.templating import Jinja2Templates
 
-from src.core.database.base import get_async_session
+from src.core.database.base import async_session, get_async_session
 from src.core.database.redis import get_redis_pool
 from src.core.security import hash_password, verify_password
 from src.schemas.user import UserCreate, UserLogin, UserUpdate
@@ -19,6 +20,8 @@ from src.services.user_service import UserAlreadyExistsError, UserService
 
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -227,6 +230,52 @@ async def chat_submit(
             "prompt": prompt,
             "response": response,
         },
+    )
+
+
+@router.post("/chat/stream", name="web_chat_stream")
+async def chat_stream(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_async_session)],
+) -> Response:
+    user = await _get_session_user(request, db)
+    if user is None:
+        return _redirect(request.url_for("web_login"))
+
+    form = await request.form()
+    prompt = (form.get("prompt") or "").strip()
+    if not prompt:
+        return Response(
+            "Please enter a message.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    async def event_stream() -> AsyncIterator[str]:
+        redis = await _get_redis()
+        try:
+            async with async_session() as session:
+                llm_service = LLMService(session=session, redis=redis)
+                async for token in llm_service.run_agent_stream(
+                    user=user,
+                    user_prompt=prompt,
+                ):
+                    payload = json.dumps({"type": "delta", "text": token})
+                    yield f"data: {payload}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        except LLMServiceError as e:
+            payload = json.dumps({"type": "error", "message": str(e)})
+            yield f"data: {payload}\n\n"
+        finally:
+            await redis.aclose()
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers=headers,
     )
 
 
