@@ -8,7 +8,6 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-import logfire
 from sqlalchemy import Float, bindparam, func, select
 
 from src.core.rag_config import (
@@ -78,72 +77,38 @@ class RetrievalService:
             include_neighbors=include_neighbors,
         )
 
-        query_preview = normalized[:200]
-        filters_payload = (
-            filters.model_dump(mode="json", exclude_none=True) if filters else None
-        )
+        cached = await self._get_cached(cache_key)
+        if cached is not None:
+            return cached
 
-        with logfire.span(
-            "retrieval.retrieve",
-            query_preview=query_preview,
-            query_len=len(normalized),
-            include_neighbors=include_neighbors,
-            filters=filters_payload,
-        ):
-            cached = await self._get_cached(cache_key)
-            if cached is not None:
-                logfire.info(
-                    "retrieval.cache_hit",
-                    chunk_count=len(cached),
-                )
-                self._log_retrieved_chunks(cached)
-                return cached
+        embedding = self._embed_query(normalized)
+        text_rows = await self._text_candidates(normalized, filters)
+        vector_rows = await self._vector_candidates(embedding, filters)
+        merged = self._rrf_merge(text_rows, vector_rows)
+        reranked = self._mock_rerank(normalized, merged)
 
-            with logfire.span("retrieval.embed_query"):
-                embedding = self._embed_query(normalized)
+        reranked = reranked[: RETRIEVAL_SETTINGS.top_n]
 
-            with logfire.span("retrieval.text_search"):
-                text_rows = await self._text_candidates(normalized, filters)
-
-            with logfire.span("retrieval.vector_search"):
-                vector_rows = await self._vector_candidates(embedding, filters)
-
-            with logfire.span("retrieval.rrf_merge"):
-                merged = self._rrf_merge(text_rows, vector_rows)
-
-            with logfire.span("retrieval.rerank"):
-                reranked = self._mock_rerank(normalized, merged)
-
-            reranked = reranked[: RETRIEVAL_SETTINGS.top_n]
-
-            results = [
-                RetrievedChunk(
-                    chunk_id=c.chunk_id,
-                    document_id=c.document_id,
-                    source_id=c.source_id,
-                    path=c.path,
-                    text=c.text,
-                    text_rank=c.text_rank,
-                    vector_rank=c.vector_rank,
-                    rrf_score=c.rrf_score,
-                    citations=[c.source_id],
-                )
-                for c in reranked
-            ]
-
-            if include_neighbors and results:
-                with logfire.span("retrieval.expand_context"):
-                    await self._expand_with_neighbors(results)
-
-            logfire.info(
-                "retrieval.results",
-                chunk_count=len(results),
-                cached=False,
+        results = [
+            RetrievedChunk(
+                chunk_id=c.chunk_id,
+                document_id=c.document_id,
+                source_id=c.source_id,
+                path=c.path,
+                text=c.text,
+                text_rank=c.text_rank,
+                vector_rank=c.vector_rank,
+                rrf_score=c.rrf_score,
+                citations=[c.source_id],
             )
-            self._log_retrieved_chunks(results)
+            for c in reranked
+        ]
 
-            await self._set_cached(cache_key, results)
-            return results
+        if include_neighbors and results:
+            await self._expand_with_neighbors(results)
+
+        await self._set_cached(cache_key, results)
+        return results
 
     @staticmethod
     def _normalize_query(query: str) -> str:
@@ -202,19 +167,6 @@ class RetrievalService:
             payload,
             ex=RETRIEVAL_SETTINGS.cache_ttl_seconds,
         )
-
-    @staticmethod
-    def _log_retrieved_chunks(results: list[RetrievedChunk]) -> None:
-        for idx, chunk in enumerate(results, start=1):
-            logfire.info(
-                "retrieval.chunk",
-                index=idx,
-                chunk_id=str(chunk.chunk_id),
-                document_id=str(chunk.document_id),
-                source_id=chunk.source_id,
-                path=chunk.path,
-                snippet=chunk.text_snippet,
-            )
 
     def _embed_query(self, query: str) -> list[float]:
         embedding = self._embedder.encode_query(

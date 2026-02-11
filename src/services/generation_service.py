@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Literal, overload
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
-import logfire
 from openai import OpenAI
 
 from src.core.config import settings as app_settings
@@ -88,13 +87,12 @@ class GenerationService:
         **kwargs: object,
     ) -> str:
         client = OpenAI(api_key=self.api_key, base_url=self.base_url)
-        with logfire.span("generation.request"):
-            response = client.chat.completions.create(
-                model=model or self.default_model,
-                messages=messages,
-                stream=False,
-                **kwargs,
-            )
+        response = client.chat.completions.create(
+            model=model or self.default_model,
+            messages=messages,
+            stream=False,
+            **kwargs,
+        )
         return response.choices[0].message.content or ""
 
     def _generate_stream(
@@ -105,23 +103,21 @@ class GenerationService:
         **kwargs: object,
     ) -> Iterable[object]:
         client = OpenAI(api_key=self.api_key, base_url=self.base_url)
-        with logfire.span("generation.stream_request"):
-            return client.chat.completions.create(
-                model=model or self.default_model,
-                messages=messages,
-                stream=True,
-                **kwargs,
-            )
+        return client.chat.completions.create(
+            model=model or self.default_model,
+            messages=messages,
+            stream=True,
+            **kwargs,
+        )
 
     def _tokens_from_provider_stream(
         self,
         stream: Iterable[object],
     ) -> Iterator[str]:
-        with logfire.span("generation.stream_consume"):
-            for event in stream:
-                token = self._extract_token(event)
-                if token is not None:
-                    yield token
+        for event in stream:
+            token = self._extract_token(event)
+            if token is not None:
+                yield token
 
     def _extract_token(self, event: object) -> str | None:
         choices = getattr(event, "choices", None)
