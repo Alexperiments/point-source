@@ -25,7 +25,7 @@ class GenerationService:
         *,
         base_url: str | None = None,
         api_key: str | None = None,
-        default_model: str | None = None,
+        model: str | None = None,
     ) -> None:
         """Initialize the generation service."""
         self.base_url = base_url or app_settings.litellm_base_url.unicode_string()
@@ -34,7 +34,7 @@ class GenerationService:
             if api_key is not None
             else app_settings.litellm_api_key.get_secret_value()
         )
-        self.default_model = default_model or AGENT_SETTINGS.model_name
+        self.model = model or AGENT_SETTINGS.model_name
 
     @overload
     def generate(
@@ -88,7 +88,7 @@ class GenerationService:
     ) -> str:
         client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         response = client.chat.completions.create(
-            model=model or self.default_model,
+            model=model or self.model,
             messages=messages,
             stream=False,
             **kwargs,
@@ -104,7 +104,7 @@ class GenerationService:
     ) -> Iterable[object]:
         client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         return client.chat.completions.create(
-            model=model or self.default_model,
+            model=model or self.model,
             messages=messages,
             stream=True,
             **kwargs,
