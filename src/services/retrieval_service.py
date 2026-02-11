@@ -10,9 +10,6 @@ from typing import TYPE_CHECKING, Any
 
 import logfire
 from sqlalchemy import Float, bindparam, func, select
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import selectinload
-from sqlalchemy.sql import cast
 
 from src.core.rag_config import (
     EMBEDDING_SETTINGS,
@@ -292,12 +289,8 @@ class RetrievalService:
             stmt = stmt.where(TextNode.document_id == filters.document_id)
         if filters.source_id is not None:
             stmt = stmt.where(DocumentNode.source_id == filters.source_id)
-        if filters.category:
-            stmt = stmt.where(
-                cast(TextNode.node_metadata, JSONB).contains(
-                    {"category": filters.category},
-                ),
-            )
+        # TODO: Category filtering disabled for now because the model can  # noqa: FIX002, TD002, TD003
+        # emit nonexistent categories, which zeroes out results.
         return stmt
 
     @staticmethod
@@ -360,31 +353,74 @@ class RetrievalService:
         if not ids:
             return
 
-        stmt = (
-            select(TextNode)
-            .options(
-                selectinload(TextNode.prev_node),
-                selectinload(TextNode.next_node),
-            )
-            .where(TextNode.id.in_(ids))
-        )
-        rows = await self.session.execute(stmt)
-        nodes = {node.id: node for node in rows.scalars().all()}
+        base = await self._load_base_chunks(ids)
+        prev_texts = await self._load_prev_texts(base)
+        next_texts = await self._load_next_texts(ids)
 
         for item in results:
-            node = nodes.get(item.chunk_id)
-            if node is None:
+            row = base.get(item.chunk_id)
+            if row is None:
                 continue
+            item.text = self._merge_neighbor_texts(
+                item,
+                row_text=row.text,
+                prev_text=prev_texts.get(row.prev_id),
+                next_text=next_texts.get(item.chunk_id),
+            )
 
-            parts: list[str] = []
-            if node.prev_node and node.prev_node.text:
-                parts.append(node.prev_node.text)
-            if node.text:
-                parts.append(node.text)
-            if node.next_node and node.next_node.text:
-                parts.append(node.next_node.text)
+    async def _load_base_chunks(self, ids: list[Any]) -> dict[Any, Any]:
+        base_stmt = select(
+            TextNode.id.label("chunk_id"),
+            TextNode.text.label("text"),
+            TextNode.prev_id.label("prev_id"),
+        ).where(TextNode.id.in_(ids))
+        base_rows = await self.session.execute(base_stmt)
+        return {row.chunk_id: row for row in base_rows}
 
-            merged = "\n\n".join(part for part in parts if part)
-            if len(merged) > RETRIEVAL_SETTINGS.max_merged_chars:
-                merged = merged[: RETRIEVAL_SETTINGS.max_merged_chars]
-            item.text = merged or item.text
+    async def _load_prev_texts(self, base: dict[Any, Any]) -> dict[Any, str]:
+        prev_ids = [row.prev_id for row in base.values() if row.prev_id]
+        if not prev_ids:
+            return {}
+        prev_stmt = select(
+            TextNode.id.label("chunk_id"),
+            TextNode.text.label("text"),
+        ).where(TextNode.id.in_(prev_ids))
+        prev_rows = await self.session.execute(prev_stmt)
+        return {row.chunk_id: row.text for row in prev_rows if row.text is not None}
+
+    async def _load_next_texts(self, ids: list[Any]) -> dict[Any, str]:
+        next_stmt = select(
+            TextNode.prev_id.label("prev_id"),
+            TextNode.text.label("text"),
+        ).where(TextNode.prev_id.in_(ids))
+        next_rows = await self.session.execute(next_stmt)
+        next_texts: dict[Any, str] = {}
+        for row in next_rows:
+            if row.prev_id is None or row.text is None:
+                continue
+            next_texts.setdefault(row.prev_id, row.text)
+        return next_texts
+
+    @staticmethod
+    def _merge_neighbor_texts(
+        item: RetrievedChunk,
+        *,
+        row_text: str | None,
+        prev_text: str | None,
+        next_text: str | None,
+    ) -> str:
+        parts: list[str] = []
+        if prev_text:
+            parts.append(prev_text)
+
+        current_text = row_text or item.text
+        if current_text:
+            parts.append(current_text)
+
+        if next_text:
+            parts.append(next_text)
+
+        merged = "\n\n".join(parts)
+        if len(merged) > RETRIEVAL_SETTINGS.max_merged_chars:
+            merged = merged[: RETRIEVAL_SETTINGS.max_merged_chars]
+        return merged or item.text
