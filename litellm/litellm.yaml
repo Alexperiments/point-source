@@ -1,7 +1,7 @@
 model_list: []
 
 litellm_settings:
-  drop_params: true
+  drop_params: false
   set_verbose: False
 
 general_settings:

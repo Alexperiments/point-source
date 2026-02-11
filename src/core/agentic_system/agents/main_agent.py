@@ -29,11 +29,11 @@ _model_settings_kwargs = {
     "temperature": AGENT_SETTINGS.temperature,
     "max_tokens": AGENT_SETTINGS.max_tokens,
 }
-extra_body: dict[str, Any] = {}
-if AGENT_SETTINGS.enable_thinking:
-    extra_body.setdefault("chat_template_kwargs", {})["enable_thinking"] = (
-        AGENT_SETTINGS.enable_thinking
-    )
+extra_body: dict[str, Any] = {
+    "chat_template_kwargs": {
+        "enable_thinking": AGENT_SETTINGS.enable_thinking,
+    },
+}
 
 custom_provider = AGENT_SETTINGS.custom_llm_provider
 if not custom_provider and AGENT_SETTINGS.model_name.startswith("custom/"):
@@ -41,8 +41,7 @@ if not custom_provider and AGENT_SETTINGS.model_name.startswith("custom/"):
 if custom_provider:
     extra_body["custom_llm_provider"] = custom_provider
 
-if extra_body:
-    _model_settings_kwargs["extra_body"] = extra_body
+_model_settings_kwargs["extra_body"] = extra_body
 
 DEFAULT_MODEL_SETTINGS = ModelSettings(**_model_settings_kwargs)
 

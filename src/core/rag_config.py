@@ -163,6 +163,7 @@ class AgentSettings(BaseSettings):
     max_tokens: int = Field(default=2048, ge=1)
     enable_thinking: bool = Field(default=False)
     instruction_slug: str = Field(default="main_agent_instructions")
+    agent_chat_warmup: bool = Field(default=True)
 
 
 CHUNKING_SETTINGS = ChunkingSettings()
