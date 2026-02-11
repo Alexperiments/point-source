@@ -84,7 +84,7 @@ async def retrieve_chunks(
     use_prev_next: bool | None = None,
 ) -> list[RetrievedChunk]:
     """Retrieve relevant document chunks for factual or research queries."""
-    service = RetrievalService(session=ctx.deps.session, redis=ctx.deps.redis)
+    service = RetrievalService(session=ctx.deps.session)
     return await service.retrieve(
         query=query,
         filters=filters,

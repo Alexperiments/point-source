@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -21,7 +19,6 @@ from src.services.embedding_service import get_embedding_service
 
 
 if TYPE_CHECKING:
-    from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql import Select
 
@@ -47,10 +44,9 @@ class _Candidate:
 class RetrievalService:
     """Service for retrieving relevant chunks."""
 
-    def __init__(self, session: AsyncSession, redis: Redis) -> None:
+    def __init__(self, session: AsyncSession) -> None:
         """Initialize the retrieval service."""
         self.session = session
-        self.redis = redis
         self._embedder = get_embedding_service()
 
     async def retrieve(
@@ -70,16 +66,6 @@ class RetrievalService:
             if use_prev_next is not None
             else RETRIEVAL_SETTINGS.use_prev_next
         )
-
-        cache_key = self._cache_key(
-            normalized_query=normalized,
-            filters=filters,
-            include_neighbors=include_neighbors,
-        )
-
-        cached = await self._get_cached(cache_key)
-        if cached is not None:
-            return cached
 
         embedding = self._embed_query(normalized)
         text_rows = await self._text_candidates(normalized, filters)
@@ -107,66 +93,11 @@ class RetrievalService:
         if include_neighbors and results:
             await self._expand_with_neighbors(results)
 
-        await self._set_cached(cache_key, results)
         return results
 
     @staticmethod
     def _normalize_query(query: str) -> str:
         return re.compile(r"\s+").sub(" ", query).strip()
-
-    def _cache_key(
-        self,
-        *,
-        normalized_query: str,
-        filters: RetrievalFilters | None,
-        include_neighbors: bool,
-    ) -> str:
-        payload = {
-            "query": normalized_query,
-            "filters": (filters.model_dump(exclude_none=True) if filters else None),
-            "include_neighbors": include_neighbors,
-            "retrieval": {
-                "top_n": RETRIEVAL_SETTINGS.top_n,
-                "text_top_k": RETRIEVAL_SETTINGS.text_top_k,
-                "vector_top_k": RETRIEVAL_SETTINGS.vector_top_k,
-                "rrf_k": RETRIEVAL_SETTINGS.rrf_k,
-                "semantic_weight": RETRIEVAL_SETTINGS.semantic_weight,
-                "text_weight": RETRIEVAL_SETTINGS.text_weight,
-            },
-            "embedding": {"model_name": EMBEDDING_SETTINGS.model_name},
-            "reranker": {
-                "enabled": RERANKER_SETTINGS.enabled,
-                "model_name": RERANKER_SETTINGS.model_name,
-                "top_k": RERANKER_SETTINGS.top_k,
-            },
-        }
-        raw = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
-        digest = hashlib.sha256(raw).hexdigest()
-        return f"{RETRIEVAL_SETTINGS.cache_prefix}{digest}"
-
-    async def _get_cached(self, cache_key: str) -> list[RetrievedChunk] | None:
-        if self.redis is None:
-            return None
-        cached = await self.redis.get(cache_key)
-        if not cached:
-            return None
-        if isinstance(cached, bytes):
-            cached = cached.decode("utf-8")
-        try:
-            payload = json.loads(cached)
-        except json.JSONDecodeError:
-            return None
-        return [RetrievedChunk.model_validate(item) for item in payload]
-
-    async def _set_cached(self, cache_key: str, results: list[RetrievedChunk]) -> None:
-        if self.redis is None:
-            return
-        payload = json.dumps([r.to_cache_dict() for r in results], default=str)
-        await self.redis.set(
-            cache_key,
-            payload,
-            ex=RETRIEVAL_SETTINGS.cache_ttl_seconds,
-        )
 
     def _embed_query(self, query: str) -> list[float]:
         embedding = self._embedder.encode_query(
