@@ -1,6 +1,6 @@
-from src.core.agentic_system.agents.main_agent import main_agent
+from src.core.agentic_system.agents.main_agent import get_main_agent
 
 
 __all__ = [
-    "main_agent",
+    "get_main_agent",
 ]
