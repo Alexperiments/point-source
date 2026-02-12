@@ -28,7 +28,7 @@ class MainAgentDependencies:
 def register_main_agent(
     agent: Agent[MainAgentDependencies, str],
 ) -> Agent[MainAgentDependencies, str]:
-    """Connect the main agent to instructions prefix and tools."""
+    """Connect the main agent to pydantic-ai instructions prefix and tools."""
 
     @agent.instructions
     async def main_agent_instructions(
