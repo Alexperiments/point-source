@@ -68,13 +68,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+SecurityMiddleware.configure_cors(app, config)
+
 logfire.configure(
-    token=settings.logfire_token.get_secret_value(),
-    send_to_logfire="if-token-present",
-    environment=settings.environment,
     service_name=PROJECT_INFO["name"],
     service_version=PROJECT_INFO["version"],
 )
+logfire.instrument_pydantic_ai()
 logfire.instrument_fastapi(app)
 
 app.add_middleware(
