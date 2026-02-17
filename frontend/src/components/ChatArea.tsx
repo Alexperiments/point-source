@@ -10,6 +10,51 @@ interface Props {
   agentStatus: AgentStatus;
 }
 
+const normalizeAssistantMarkdown = (content: string): string => {
+  const lines = content.split("\n");
+  let inFence = false;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const current = lines[i];
+    if (current.trimStart().startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
+
+    if (inFence || !current.trim().endsWith(":")) {
+      continue;
+    }
+
+    let j = i + 1;
+    while (j < lines.length && lines[j].trim() === "") {
+      j += 1;
+    }
+
+    const blockIndexes: number[] = [];
+    while (j < lines.length) {
+      const candidate = lines[j];
+      if (candidate.trim() === "") {
+        break;
+      }
+      if (!candidate.startsWith("    ")) {
+        break;
+      }
+      blockIndexes.push(j);
+      j += 1;
+    }
+
+    if (blockIndexes.length < 2) {
+      continue;
+    }
+
+    for (const idx of blockIndexes) {
+      lines[idx] = `- ${lines[idx].trim()}`;
+    }
+  }
+
+  return lines.join("\n");
+};
+
 const ChatArea = ({ conversation, onSend, agentStatus }: Props) => {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -75,7 +120,7 @@ const ChatArea = ({ conversation, onSend, agentStatus }: Props) => {
                     {msg.role === "user" ? "You" : "Assistant"}
                   </p>
                   {msg.role === "assistant" ? (
-                    <div className="prose prose-sm prose-neutral max-w-none text-foreground [&_p]:leading-relaxed [&_pre]:bg-accent [&_pre]:text-accent-foreground [&_pre]:rounded-lg [&_pre]:p-3 [&_code]:bg-accent [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-sm [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2 [&_h2]:text-xs [&_h2]:uppercase [&_h2]:tracking-wide [&_h2]:text-muted-foreground [&_h2]:mt-4 [&_h2]:mb-2 [&_ol]:text-xs [&_ol]:text-muted-foreground">
+                    <div className="max-w-none font-sans text-[15px] leading-7 text-foreground [&_p]:my-0 [&_p+*]:mt-4 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_strong]:font-semibold [&_h1]:my-4 [&_h1]:text-[15px] [&_h1]:font-semibold [&_h2]:my-4 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:my-4 [&_h3]:text-[15px] [&_h3]:font-semibold [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-accent [&_pre]:p-3 [&_pre]:text-accent-foreground [&_code]:rounded [&_code]:bg-accent [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.9em] [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2">
                       <ReactMarkdown
                         components={{
                           a: ({ href, children }) => (
@@ -84,7 +129,7 @@ const ChatArea = ({ conversation, onSend, agentStatus }: Props) => {
                             </a>
                           ),
                         }}
-                      >{msg.content}</ReactMarkdown>
+                      >{normalizeAssistantMarkdown(msg.content)}</ReactMarkdown>
                     </div>
                   ) : (
                     <div className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">

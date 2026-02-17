@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Literal
 
+from pydantic_ai.usage import UsageLimits
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +13,7 @@ from src.core.agentic_system.agents.main_agent import (
     MainAgentDependencies,
     get_main_agent,
 )
+from src.core.rag_config import AGENT_SETTINGS
 from src.models.user import User
 
 
@@ -41,6 +43,15 @@ class LLMService:
         self.session = session
         self.redis = redis
 
+    @staticmethod
+    def _build_usage_limits() -> UsageLimits:
+        kwargs: dict[str, int] = {
+            "request_limit": AGENT_SETTINGS.request_limit,
+        }
+        if AGENT_SETTINGS.tool_calls_limit is not None:
+            kwargs["tool_calls_limit"] = AGENT_SETTINGS.tool_calls_limit
+        return UsageLimits(**kwargs)
+
     async def run_agent(
         self,
         user: User,
@@ -67,6 +78,7 @@ class LLMService:
                     session=self.session,
                     redis=self.redis,
                 ),
+                usage_limits=self._build_usage_limits(),
             )
         except Exception as e:
             raise LLMServiceError(f"Failed to run agent: {e!s}") from e
@@ -99,17 +111,25 @@ class LLMService:
         async def produce() -> None:
             await emit_status("thinking")
             try:
-                async with get_main_agent().run_stream(
-                    user_prompt=user_prompt,
-                    deps=MainAgentDependencies(
-                        user_name=user.name or user.email,
-                        session=self.session,
-                        redis=self.redis,
-                        status_callback=emit_status,
+                async with asyncio.timeout(AGENT_SETTINGS.stream_timeout_seconds):
+                    async with get_main_agent().run_stream(
+                        user_prompt=user_prompt,
+                        deps=MainAgentDependencies(
+                            user_name=user.name or user.email,
+                            session=self.session,
+                            redis=self.redis,
+                            status_callback=emit_status,
+                        ),
+                        usage_limits=self._build_usage_limits(),
+                    ) as agent_run:
+                        async for token in agent_run.stream_text(delta=True):
+                            await queue.put(LLMStreamEvent(kind="delta", value=token))
+            except TimeoutError:
+                await queue.put(
+                    LLMServiceError(
+                        "Agent stream timed out before producing a final response.",
                     ),
-                ) as agent_run:
-                    async for token in agent_run.stream_text(delta=True):
-                        await queue.put(LLMStreamEvent(kind="delta", value=token))
+                )
             except Exception as e:  # noqa: BLE001
                 await queue.put(e)
             finally:
@@ -123,6 +143,8 @@ class LLMService:
                 if item is None:
                     break
                 if isinstance(item, Exception):
+                    if isinstance(item, LLMServiceError):
+                        raise item
                     raise LLMServiceError(
                         f"Failed to run agent stream: {item!s}",
                     ) from item

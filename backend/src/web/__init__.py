@@ -257,11 +257,16 @@ async def chat_stream(
         try:
             async with async_session() as session:
                 llm_service = LLMService(session=session, redis=redis)
-                async for token in llm_service.run_agent_stream(
+                async for event in llm_service.run_agent_stream(
                     user=user,
                     user_prompt=prompt,
                 ):
-                    payload = json.dumps({"type": "delta", "text": token})
+                    if event.kind == "status":
+                        payload = json.dumps({"type": "status", "status": event.value})
+                        yield f"data: {payload}\n\n"
+                        continue
+
+                    payload = json.dumps({"type": "delta", "text": event.value})
                     yield f"data: {payload}\n\n"
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except LLMServiceError as e:

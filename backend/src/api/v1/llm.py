@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from loguru import logger
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
@@ -106,7 +107,8 @@ async def chat_stream(
                 yield f"data: {json.dumps(payload)}\n\n"
 
             yield "data: [DONE]\n\n"
-        except LLMServiceError:
+        except LLMServiceError as e:
+            logger.exception("LLM stream failed: {}", e)
             payload = {
                 "choices": [
                     {

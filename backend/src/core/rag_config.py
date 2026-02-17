@@ -155,14 +155,17 @@ class AgentSettings(BaseSettings):
     )
 
     name: str = Field(default="Main Agent")
-    model_name: str = Field(default="custom/qwen3-4b-mlx-4bit")
+    model_name: str = Field(default="gpt-5-nano")
     custom_llm_provider: str | None = Field(
         default=None,
         description="LiteLLM custom provider override for custom model routing.",
     )
     temperature: float = Field(default=0.3, ge=0.0)
-    max_tokens: int = Field(default=2048, ge=1)
+    max_tokens: int = Field(default=8192, ge=1)
     instruction_slug: str = Field(default="main_agent_instructions")
+    request_limit: int = Field(default=50, ge=1)
+    tool_calls_limit: int | None = Field(default=None, ge=1)
+    stream_timeout_seconds: int = Field(default=180, ge=5)
 
 
 CHUNKING_SETTINGS = ChunkingSettings()

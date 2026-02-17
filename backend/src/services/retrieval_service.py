@@ -72,10 +72,9 @@ class RetrievalService:
         )
 
         embedding = await self._embed_query_async(normalized)
-        text_rows, vector_rows = await asyncio.gather(
-            self._text_candidates(normalized, filters),
-            self._vector_candidates(embedding, filters),
-        )
+        # Keep query execution sequential since AsyncSession is not concurrency-safe.
+        text_rows = await self._text_candidates(normalized, filters)
+        vector_rows = await self._vector_candidates(embedding, filters)
         merged = self._rrf_merge(text_rows, vector_rows)
         reranked = self._mock_rerank(normalized, merged)
 
