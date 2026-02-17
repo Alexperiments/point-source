@@ -76,21 +76,29 @@ async def chat_stream(
     db: Annotated[AsyncSession, Depends(get_async_session)],
     redis: Annotated[Redis, Depends(get_redis)],
 ) -> StreamingResponse:
-    """Stream chat response in OpenAI-like SSE payload format."""
+    """Stream chat response and status updates in SSE payload format."""
     prompt = _resolve_stream_prompt(request)
 
     async def event_stream() -> AsyncIterator[str]:
         try:
             llm_service = LLMService(session=db, redis=redis)
-            async for token in llm_service.run_agent_stream(
+            async for event in llm_service.run_agent_stream(
                 user=current_user,
                 user_prompt=prompt,
             ):
+                if event.kind == "status":
+                    payload = {
+                        "type": "status",
+                        "status": event.value,
+                    }
+                    yield f"data: {json.dumps(payload)}\n\n"
+                    continue
+
                 payload = {
                     "choices": [
                         {
                             "delta": {
-                                "content": token,
+                                "content": event.value,
                             },
                         },
                     ],

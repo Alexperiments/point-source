@@ -193,3 +193,7 @@ cython_debug/
 node_modules/
 *.tsbuildinfo
 vite.config.ts.timestamp-*.mjs
+
+# Frontend source exceptions
+!frontend/src/lib/
+!frontend/src/lib/**

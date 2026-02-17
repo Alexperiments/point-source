@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 const labels: Record<AgentStatus, string> = {
   idle: "",
   thinking: "Thinking…",
+  retrieving: "Retrieving documents…",
   streaming: "Generating response…",
 };
 

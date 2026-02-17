@@ -123,6 +123,7 @@ class RetrievalSettings(BaseSettings):
     max_merged_chars: int = Field(default=4000)
     cache_prefix: str = Field(default="retrieval_cache:")
     cache_ttl_seconds: int = Field(default=900)
+    tool_timeout_seconds: int = Field(default=45, ge=5)
 
 
 class RerankerSettings(BaseSettings):

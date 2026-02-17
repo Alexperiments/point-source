@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -15,7 +16,10 @@ from src.core.rag_config import (
 )
 from src.models.node import DocumentNode, TextNode
 from src.schemas.retrieval import RetrievalFilters, RetrievedChunk
-from src.services.embedding_service import get_embedding_service
+from src.services.embedding_service import (
+    MLXQwen3EmbeddingService,
+    get_embedding_service,
+)
 
 
 if TYPE_CHECKING:
@@ -47,7 +51,7 @@ class RetrievalService:
     def __init__(self, session: AsyncSession) -> None:
         """Initialize the retrieval service."""
         self.session = session
-        self._embedder = get_embedding_service()
+        self._embedder: MLXQwen3EmbeddingService | None = None
 
     async def retrieve(
         self,
@@ -67,9 +71,11 @@ class RetrievalService:
             else RETRIEVAL_SETTINGS.use_prev_next
         )
 
-        embedding = self._embed_query(normalized)
-        text_rows = await self._text_candidates(normalized, filters)
-        vector_rows = await self._vector_candidates(embedding, filters)
+        embedding = await self._embed_query_async(normalized)
+        text_rows, vector_rows = await asyncio.gather(
+            self._text_candidates(normalized, filters),
+            self._vector_candidates(embedding, filters),
+        )
         merged = self._rrf_merge(text_rows, vector_rows)
         reranked = self._mock_rerank(normalized, merged)
 
@@ -99,12 +105,21 @@ class RetrievalService:
     def _normalize_query(query: str) -> str:
         return re.compile(r"\s+").sub(" ", query).strip()
 
+    def _get_embedder(self) -> MLXQwen3EmbeddingService:
+        if self._embedder is None:
+            self._embedder = get_embedding_service()
+        return self._embedder
+
     def _embed_query(self, query: str) -> list[float]:
-        embedding = self._embedder.encode_query(
+        embedder = self._get_embedder()
+        embedding = embedder.encode_query(
             [query],
             batch_size=EMBEDDING_SETTINGS.query_batch_size,
         )
         return embedding[0].tolist()
+
+    async def _embed_query_async(self, query: str) -> list[float]:
+        return await asyncio.to_thread(self._embed_query, query)
 
     async def _text_candidates(
         self,

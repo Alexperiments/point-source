@@ -1,6 +1,9 @@
 """LLM service for running agents."""
 
+import asyncio
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from typing import Literal
 
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +17,14 @@ from src.models.user import User
 
 class LLMServiceError(Exception):
     """Exception for LLM service errors."""
+
+
+@dataclass(frozen=True, slots=True)
+class LLMStreamEvent:
+    """A stream event emitted while generating an assistant response."""
+
+    kind: Literal["status", "delta"]
+    value: str
 
 
 class LLMService:
@@ -66,30 +77,55 @@ class LLMService:
         self,
         user: User,
         user_prompt: str,
-    ) -> AsyncIterator[str]:
-        """Run the main agent and stream its response tokens.
+    ) -> AsyncIterator[LLMStreamEvent]:
+        """Run the main agent and stream status + response token deltas.
 
         Args:
             user: The user running the agent.
             user_prompt: The user's prompt/query.
 
         Yields:
-            Token deltas as they are produced.
+            `LLMStreamEvent` items for status transitions and text deltas.
 
         Raises:
             LLMServiceError: If the agent run fails.
 
         """
+        queue: asyncio.Queue[LLMStreamEvent | Exception | None] = asyncio.Queue()
+
+        async def emit_status(status: str) -> None:
+            await queue.put(LLMStreamEvent(kind="status", value=status))
+
+        async def produce() -> None:
+            await emit_status("thinking")
+            try:
+                async with get_main_agent().run_stream(
+                    user_prompt=user_prompt,
+                    deps=MainAgentDependencies(
+                        user_name=user.name or user.email,
+                        session=self.session,
+                        redis=self.redis,
+                        status_callback=emit_status,
+                    ),
+                ) as agent_run:
+                    async for token in agent_run.stream_text(delta=True):
+                        await queue.put(LLMStreamEvent(kind="delta", value=token))
+            except Exception as e:  # noqa: BLE001
+                await queue.put(e)
+            finally:
+                await queue.put(None)
+
+        producer_task = asyncio.create_task(produce())
+
         try:
-            async with get_main_agent().run_stream(
-                user_prompt=user_prompt,
-                deps=MainAgentDependencies(
-                    user_name=user.name or user.email,
-                    session=self.session,
-                    redis=self.redis,
-                ),
-            ) as agent_run:
-                async for token in agent_run.stream_text(delta=True):
-                    yield token
-        except Exception as e:
-            raise LLMServiceError(f"Failed to run agent stream: {e!s}") from e
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                if isinstance(item, Exception):
+                    raise LLMServiceError(
+                        f"Failed to run agent stream: {item!s}",
+                    ) from item
+                yield item
+        finally:
+            await producer_task

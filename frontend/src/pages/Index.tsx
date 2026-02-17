@@ -18,7 +18,7 @@ export interface Conversation {
   createdAt: Date;
 }
 
-export type AgentStatus = "idle" | "thinking" | "streaming";
+export type AgentStatus = "idle" | "thinking" | "retrieving" | "streaming";
 
 const Index = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -84,8 +84,23 @@ const Index = () => {
     try {
       await streamChat({
         messages: apiMessages,
+        onStatus: (status) => {
+          if (status === "retrieving_documents") {
+            setAgentStatus("retrieving");
+            return;
+          }
+
+          if (status === "retrieval_timeout" || status === "retrieval_failed") {
+            setAgentStatus("thinking");
+            return;
+          }
+
+          if (status === "thinking") {
+            setAgentStatus("thinking");
+          }
+        },
         onDelta: (chunk) => {
-          if (agentStatus !== "streaming") setAgentStatus("streaming");
+          setAgentStatus("streaming");
           assistantSoFar += chunk;
           const updatedContent = assistantSoFar;
           setConversations((prev) =>

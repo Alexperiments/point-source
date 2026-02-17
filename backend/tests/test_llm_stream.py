@@ -8,7 +8,7 @@ from src.api.v1.llm import get_redis
 from src.core.security import hash_password
 from src.main import app
 from src.models.user import User
-from src.services.llm_service import LLMService
+from src.services.llm_service import LLMService, LLMStreamEvent
 
 
 class _FakeRedis:
@@ -22,7 +22,7 @@ async def test_chat_stream_emits_valid_sse_framing(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure streaming endpoint uses real SSE line delimiters."""
+    """Ensure streaming endpoint uses valid SSE delimiters and status messages."""
     password = "SecurePass123"
     user = User(
         name="Stream User",
@@ -45,8 +45,9 @@ async def test_chat_stream_emits_valid_sse_framing(
     ):
         assert user.email == "stream@example.com"
         assert user_prompt == "Hello stream"
-        yield "Hello"
-        yield " world"
+        yield LLMStreamEvent(kind="status", value="retrieving_documents")
+        yield LLMStreamEvent(kind="delta", value="Hello")
+        yield LLMStreamEvent(kind="delta", value=" world")
 
     async def fake_redis() -> _FakeRedis:
         return _FakeRedis()
@@ -69,5 +70,7 @@ async def test_chat_stream_emits_valid_sse_framing(
     body = response.text
     assert "data: [DONE]\n\n" in body
     assert "data: [DONE]\\n\\n" not in body
+    assert '"type": "status"' in body
+    assert '"status": "retrieving_documents"' in body
     assert '"content": "Hello"' in body
     assert '"content": " world"' in body
