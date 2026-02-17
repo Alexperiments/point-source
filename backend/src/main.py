@@ -57,6 +57,9 @@ app = FastAPI(
 )
 
 logfire.configure(
+    token=settings.logfire_token.get_secret_value(),
+    send_to_logfire="if-token-present",
+    environment=settings.environment,
     service_name=PROJECT_INFO["name"],
     service_version=PROJECT_INFO["version"],
 )
