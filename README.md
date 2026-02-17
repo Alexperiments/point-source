@@ -47,7 +47,22 @@ Most RAG projects rely on high-level wrappers like LangChain. This project inten
 
 ## Setup & Usage
 
-WIP
+### Local Development
+
+1. Start infra services:
+   - `make docker-dev-up`
+2. Start backend:
+   - `make run-dev`
+3. Start frontend dev server:
+   - `cd frontend && npm ci && npm run dev`
+
+### Single-App Mode (backend serves frontend)
+
+1. Build frontend assets:
+   - `cd frontend && npm ci && npm run build`
+2. Start backend:
+   - `make run-dev`
+3. Open `http://localhost:8000`.
 
 ## Contributing
 

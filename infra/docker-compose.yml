@@ -2,8 +2,8 @@ services:
   pydantic-ai:
     container_name: pydantic-ai
     build:
-      context: ../backend
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: backend/Dockerfile
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
@@ -20,7 +20,7 @@ services:
       LITELLM_BASE_URL: "http://litellm:4000"
       REDIS_HOST: "redis"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health/"]
       interval: 10s
       timeout: 5s
       retries: 3
