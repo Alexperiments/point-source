@@ -95,9 +95,9 @@ async def chat_stream(
                         },
                     ],
                 }
-                yield f"data: {json.dumps(payload)}\\n\\n"
+                yield f"data: {json.dumps(payload)}\n\n"
 
-            yield "data: [DONE]\\n\\n"
+            yield "data: [DONE]\n\n"
         except LLMServiceError:
             payload = {
                 "choices": [
@@ -108,8 +108,8 @@ async def chat_stream(
                     },
                 ],
             }
-            yield f"data: {json.dumps(payload)}\\n\\n"
-            yield "data: [DONE]\\n\\n"
+            yield f"data: {json.dumps(payload)}\n\n"
+            yield "data: [DONE]\n\n"
         finally:
             await redis.aclose()
 
