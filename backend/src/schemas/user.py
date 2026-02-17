@@ -131,3 +131,47 @@ class TokenValidationResponse(BaseModel):
         ...,
         description="The user ID associated with the token",
     )
+
+
+class ProfileUpdateRequest(BaseModel):
+    """Schema for updating current user's profile settings."""
+
+    name: str | None = Field(
+        default=None,
+        max_length=255,
+        description="User's full name",
+    )
+    email: str | None = Field(
+        default=None,
+        max_length=255,
+        description="User's email address",
+    )
+    current_password: str | None = Field(
+        default=None,
+        max_length=100,
+        description="Current password, required when changing password",
+    )
+    new_password: str | None = Field(
+        default=None,
+        max_length=100,
+        description="New password",
+    )
+    confirm_password: str | None = Field(
+        default=None,
+        max_length=100,
+        description="Confirmation for the new password",
+    )
+
+
+class ProfileUpdateResponse(BaseModel):
+    """Schema for profile update response."""
+
+    user: UserResponse = Field(..., description="Updated user profile")
+    access_token: str | None = Field(
+        default=None,
+        description="New access token when profile changes",
+    )
+    token_type: str | None = Field(
+        default=None,
+        description="Token type for the access token",
+    )

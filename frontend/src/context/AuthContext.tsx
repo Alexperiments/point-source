@@ -19,11 +19,20 @@ type RegisterInput = {
   password: string;
 };
 
+type ProfileUpdateInput = {
+  name: string;
+  email: string;
+  currentPassword?: string;
+  newPassword?: string;
+  confirmPassword?: string;
+};
+
 type AuthContextValue = {
   user: AuthUser | null;
   isLoading: boolean;
   login: (input: LoginInput) => Promise<void>;
   register: (input: RegisterInput) => Promise<void>;
+  updateProfile: (input: ProfileUpdateInput) => Promise<void>;
   logout: () => void;
 };
 
@@ -207,6 +216,51 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     });
   };
 
+  const updateProfile = async ({
+    name,
+    email,
+    currentPassword,
+    newPassword,
+    confirmPassword,
+  }: ProfileUpdateInput) => {
+    const token = getAccessToken();
+
+    if (!token) {
+      throw new Error("You must be logged in to update your profile.");
+    }
+
+    const response = await requestJson<Record<string, unknown>>(`${AUTH_BASE_URL}/users/me`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        name: name.trim(),
+        email: normalizeEmail(email),
+        current_password: currentPassword?.trim() || "",
+        new_password: newPassword?.trim() || "",
+        confirm_password: confirmPassword?.trim() || "",
+      }),
+    });
+
+    const nextToken =
+      (typeof response.access_token === "string" && response.access_token) || token;
+
+    if (nextToken !== token) {
+      setAccessToken(nextToken);
+    }
+
+    try {
+      const currentUser = await fetchCurrentUser(nextToken);
+      setUser(currentUser);
+    } catch (error) {
+      clearAccessToken();
+      setUser(null);
+      throw error;
+    }
+  };
+
   const logout = () => {
     clearAccessToken();
     setUser(null);
@@ -218,6 +272,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       isLoading,
       login,
       register,
+      updateProfile,
       logout,
     }),
     [user, isLoading]

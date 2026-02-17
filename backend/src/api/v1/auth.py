@@ -1,26 +1,30 @@
 """Auth API."""
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import SecretStr, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database.base import get_async_session
-from src.core.security import oauth2_scheme
+from src.core.security import hash_password, oauth2_scheme, verify_password
 from src.models.user import User
 from src.schemas.user import (
+    ProfileUpdateRequest,
+    ProfileUpdateResponse,
     Token,
     TokenValidationResponse,
     UserCreate,
     UserLogin,
     UserResponse,
+    UserUpdate,
 )
 from src.services.auth_service import (
     AuthService,
     InvalidCredentialsError,
     TokenValidationError,
 )
-from src.services.user_service import UserAlreadyExistsError
+from src.services.user_service import UserAlreadyExistsError, UserService
 
 
 router = APIRouter()
@@ -87,3 +91,136 @@ async def get_current_user_info(
 ) -> User:
     """Get current user information."""
     return current_user
+
+
+@router.patch("/users/me", response_model=ProfileUpdateResponse)
+async def update_current_user_info(
+    profile_data: ProfileUpdateRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_async_session)],
+) -> ProfileUpdateResponse:
+    """Update the current user's profile and optional password."""
+    name = (profile_data.name or "").strip()
+    email = (profile_data.email or "").strip()
+    current_password = profile_data.current_password or ""
+    new_password = profile_data.new_password or ""
+    confirm_password = profile_data.confirm_password or ""
+
+    errors: list[str] = []
+    update_data = _build_profile_update_data(name, email, current_user)
+    user, updated_profile = await _apply_profile_updates(
+        db,
+        current_user,
+        update_data,
+        errors,
+    )
+    updated_password = await _apply_password_change(
+        db,
+        user,
+        current_password,
+        new_password,
+        confirm_password,
+        errors,
+    )
+
+    if errors:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=errors)
+
+    updated = updated_profile or updated_password
+    access_token = None
+    token_type = None
+
+    if updated:
+        auth_service = AuthService(db)
+        token = auth_service.create_token(user)
+        access_token = token.access_token
+        token_type = token.token_type
+
+    await db.refresh(user)
+
+    return ProfileUpdateResponse(
+        user=user,
+        access_token=access_token,
+        token_type=token_type,
+    )
+
+
+def _build_profile_update_data(
+    name: str,
+    email: str,
+    user: User,
+) -> dict[str, Any]:
+    update_data: dict[str, Any] = {}
+    if name and name != user.name:
+        update_data["name"] = name
+    if email and email != user.email:
+        update_data["email"] = email
+    return update_data
+
+
+async def _apply_profile_updates(
+    db: AsyncSession,
+    user: User,
+    update_data: dict[str, Any],
+    errors: list[str],
+) -> tuple[User, bool]:
+    if not update_data:
+        return user, False
+
+    try:
+        user_service = UserService(db)
+        user = await user_service.update_user(user.id, UserUpdate(**update_data))
+    except UserAlreadyExistsError:
+        errors.append("That email is already in use.")
+    except ValidationError as e:
+        errors.append(e.errors()[0].get("msg", "Invalid input"))
+    else:
+        return user, True
+
+    return user, False
+
+
+async def _apply_password_change(
+    db: AsyncSession,
+    user: User,
+    current_password: str,
+    new_password: str,
+    confirm_password: str,
+    errors: list[str],
+) -> bool:
+    if not _password_change_requested(
+        current_password,
+        new_password,
+        confirm_password,
+    ):
+        return False
+
+    if not current_password:
+        errors.append("Current password is required to change your password.")
+        return False
+
+    if new_password != confirm_password:
+        errors.append("New passwords do not match.")
+        return False
+
+    try:
+        UserUpdate(password=SecretStr(new_password))
+    except ValidationError as e:
+        errors.append(e.errors()[0].get("msg", "Invalid password"))
+        return False
+
+    if not verify_password(current_password, user.hashed_password):
+        errors.append("Current password is incorrect.")
+        return False
+
+    user.hashed_password = hash_password(new_password)
+    await db.flush()
+    return True
+
+
+def _password_change_requested(
+    current_password: str,
+    new_password: str,
+    confirm_password: str,
+) -> bool:
+    return any([current_password, new_password, confirm_password])

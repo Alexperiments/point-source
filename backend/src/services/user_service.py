@@ -151,6 +151,8 @@ class UserService:
 
         if user_data.name is not None:
             user.name = user_data.name
+        if user_data.email is not None:
+            user.email = user_data.email
         if user_data.is_superuser is not None:
             user.is_superuser = user_data.is_superuser
 

@@ -314,3 +314,183 @@ async def test_login_missing_fields(client: AsyncClient) -> None:
         json={"password": "SecurePass123"},
     )
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_update_current_user_profile_success(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """Test updating current user profile fields returns updated user + token."""
+    password = "SecurePass123"
+    user = User(
+        name="Test User",
+        email="test@example.com",
+        hashed_password=hash_password(password),
+        is_superuser=False,
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    login_response = await client.post(
+        "/v1/auth/token",
+        json={"email": "test@example.com", "password": password},
+    )
+    token = login_response.json()["access_token"]
+
+    response = await client.patch(
+        "/v1/auth/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "name": "Updated User",
+            "email": "updated@example.com",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["user"]["name"] == "Updated User"
+    assert data["user"]["email"] == "updated@example.com"
+    assert isinstance(data["access_token"], str)
+    assert data["token_type"] == "Bearer"
+
+    me_response = await client.get(
+        "/v1/auth/users/me",
+        headers={"Authorization": f"Bearer {data['access_token']}"},
+    )
+    assert me_response.status_code == 200
+    assert me_response.json()["email"] == "updated@example.com"
+
+
+@pytest.mark.asyncio
+async def test_update_current_user_password_success(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """Test updating current user password rotates credentials."""
+    current_password = "SecurePass123"
+    new_password = "NewSecurePass456"
+
+    user = User(
+        name="Test User",
+        email="test@example.com",
+        hashed_password=hash_password(current_password),
+        is_superuser=False,
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    login_response = await client.post(
+        "/v1/auth/token",
+        json={"email": "test@example.com", "password": current_password},
+    )
+    token = login_response.json()["access_token"]
+
+    response = await client.patch(
+        "/v1/auth/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "name": "Test User",
+            "email": "test@example.com",
+            "current_password": current_password,
+            "new_password": new_password,
+            "confirm_password": new_password,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert isinstance(payload["access_token"], str)
+
+    old_login = await client.post(
+        "/v1/auth/token",
+        json={"email": "test@example.com", "password": current_password},
+    )
+    assert old_login.status_code == 401
+
+    new_login = await client.post(
+        "/v1/auth/token",
+        json={"email": "test@example.com", "password": new_password},
+    )
+    assert new_login.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_update_current_user_password_missing_current_fails(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """Test password update requires current password."""
+    user = User(
+        name="Test User",
+        email="test@example.com",
+        hashed_password=hash_password("SecurePass123"),
+        is_superuser=False,
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    login_response = await client.post(
+        "/v1/auth/token",
+        json={"email": "test@example.com", "password": "SecurePass123"},
+    )
+    token = login_response.json()["access_token"]
+
+    response = await client.patch(
+        "/v1/auth/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "name": "Test User",
+            "email": "test@example.com",
+            "new_password": "NewSecurePass456",
+            "confirm_password": "NewSecurePass456",
+        },
+    )
+
+    assert response.status_code == 400
+    detail = response.json().get("detail", [])
+    assert isinstance(detail, list)
+    assert "Current password is required to change your password." in detail
+
+
+@pytest.mark.asyncio
+async def test_update_current_user_duplicate_email_fails(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """Test profile update fails when target email already exists."""
+    user = User(
+        name="Primary User",
+        email="primary@example.com",
+        hashed_password=hash_password("SecurePass123"),
+        is_superuser=False,
+    )
+    other = User(
+        name="Other User",
+        email="other@example.com",
+        hashed_password=hash_password("SecurePass123"),
+        is_superuser=False,
+    )
+    db_session.add(user)
+    db_session.add(other)
+    await db_session.commit()
+
+    login_response = await client.post(
+        "/v1/auth/token",
+        json={"email": "primary@example.com", "password": "SecurePass123"},
+    )
+    token = login_response.json()["access_token"]
+
+    response = await client.patch(
+        "/v1/auth/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "name": "Primary User",
+            "email": "other@example.com",
+        },
+    )
+
+    assert response.status_code == 400
+    detail = response.json().get("detail", [])
+    assert isinstance(detail, list)
+    assert "That email is already in use." in detail

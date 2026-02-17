@@ -20,7 +20,7 @@ Most RAG projects rely on high-level wrappers like LangChain. This project inten
 
 - `backend/`: FastAPI app, tests, migrations, scripts, and Python project files.
 - `infra/`: Docker Compose, LiteLLM, Grafana, and Prometheus configuration.
-- `frontend/`: Reserved for frontend app code.
+- `frontend/`: React + Vite frontend application.
 - `deployment/`: Reserved for deployment manifests and automation.
 
 ## Roadmap
