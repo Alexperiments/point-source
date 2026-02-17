@@ -1,0 +1,43 @@
+<svg width="768" height="768" viewBox="0 0 768 768" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="sphere" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(384 364) rotate(90) scale(260)">
+      <stop offset="0%" stop-color="#DCE7FF"/>
+      <stop offset="58%" stop-color="#D4D9E5"/>
+      <stop offset="100%" stop-color="#D7D9DE"/>
+    </radialGradient>
+    <radialGradient id="coreGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(384 384) rotate(90) scale(112)">
+      <stop offset="0%" stop-color="#A7C5FF" stop-opacity="0.66"/>
+      <stop offset="100%" stop-color="#A7C5FF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ringMain" x1="172" y1="382" x2="596" y2="386" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7ED7FF"/>
+      <stop offset="100%" stop-color="#7D79FF"/>
+    </linearGradient>
+    <linearGradient id="ringTilt" x1="228" y1="196" x2="540" y2="560" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#9FD9FF"/>
+      <stop offset="100%" stop-color="#A9A7FF"/>
+    </linearGradient>
+    <linearGradient id="star" x1="320" y1="384" x2="448" y2="384" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#67E8F9"/>
+      <stop offset="100%" stop-color="#6366F1"/>
+    </linearGradient>
+    <filter id="starGlow" x="282" y="282" width="204" height="204" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <circle cx="384" cy="384" r="190" fill="url(#sphere)"/>
+  <ellipse cx="384" cy="384" rx="186" ry="75" fill="none" stroke="url(#ringMain)" stroke-width="8"/>
+  <ellipse cx="384" cy="384" rx="121" ry="188" transform="rotate(24 384 384)" fill="none" stroke="url(#ringTilt)" stroke-width="5" opacity="0.95"/>
+
+  <circle cx="384" cy="384" r="120" fill="url(#coreGlow)"/>
+
+  <g filter="url(#starGlow)">
+    <path d="M384 300L410 358L468 384L410 410L384 468L358 410L300 384L358 358L384 300Z" fill="url(#star)"/>
+    <path d="M384 332L401 371L440 384L401 397L384 436L367 397L328 384L367 371L384 332Z" fill="#D7F3FF" fill-opacity="0.95"/>
+  </g>
+</svg>

@@ -95,6 +95,24 @@ const ChatSidebar = ({ conversations, activeId, onSelect, onNew, onDelete, open,
       >
         {!open ? null : (
           <div className="flex h-full w-64 flex-col">
+            <div className="border-b border-sidebar-border px-3 py-3">
+              <div className="flex items-center gap-2">
+                <img
+                  src="/point-source-logo.svg"
+                  alt="Point-source logo"
+                  className="h-7 w-7 shrink-0"
+                />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-sidebar-foreground">
+                    Point-source
+                  </p>
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    Astrophysics RAG
+                  </p>
+                </div>
+              </div>
+            </div>
+
             {/* Header */}
             <div className="flex items-center justify-between p-3">
               <button
