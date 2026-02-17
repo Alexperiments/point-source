@@ -1,5 +1,7 @@
 """Admin panel configuration."""
 
+from pathlib import Path
+
 import jinja2
 from fastapi import status
 from sqlalchemy import select
@@ -21,12 +23,13 @@ from src.core.security import verify_password
 from src.models import User
 
 
-TEMPLATES_DIR = "templates"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+TEMPLATES_DIR = PROJECT_ROOT / "templates"
 templates = Jinja2Templates(
-    directory=[TEMPLATES_DIR],
+    directory=[str(TEMPLATES_DIR)],
     loader=jinja2.ChoiceLoader(
         [
-            jinja2.FileSystemLoader("templates"),
+            jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
             jinja2.PackageLoader(
                 "starlette_admin",
                 "templates",

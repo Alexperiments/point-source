@@ -2,7 +2,7 @@ services:
   pydantic-ai:
     container_name: pydantic-ai
     build:
-      context: .
+      context: ../backend
       dockerfile: Dockerfile
     ports:
       - "${API_PORT:-8000}:8000"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, status
@@ -30,7 +31,8 @@ if TYPE_CHECKING:
 
 router = APIRouter()
 
-templates = Jinja2Templates(directory="templates")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+templates = Jinja2Templates(directory=str(PROJECT_ROOT / "templates"))
 
 
 def _redirect(url: str) -> RedirectResponse:

@@ -1,1 +1,0 @@
-"""Embedding evaluation package."""

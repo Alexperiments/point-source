@@ -3,6 +3,13 @@
 # Default target
 .DEFAULT_GOAL := help
 
+# Monorepo directories
+BACKEND_DIR := backend
+INFRA_DIR := infra
+BACKEND_ENV := $(BACKEND_DIR)/.env.development
+INFRA_DEV_COMPOSE := $(INFRA_DIR)/docker-compose.dev.yml
+INFRA_COMPOSE := $(INFRA_DIR)/docker-compose.yml
+
 # Colors for help output
 BLUE := \033[0;34m
 GREEN := \033[0;32m
@@ -16,77 +23,77 @@ help: ## Show this help message
 	@echo ""
 
 install: ## Install project dependencies
-	uv sync
+	cd $(BACKEND_DIR) && uv sync
 
 install-dev: ## Install project dependencies including dev dependencies
-	uv sync --all-groups
+	cd $(BACKEND_DIR) && uv sync --all-groups
 
 run: ## Run the application in production mode
-	uv run uvicorn src.main:app --host 0.0.0.0 --port 8000
+	cd $(BACKEND_DIR) && uv run uvicorn src.main:app --host 0.0.0.0 --port 8000
 
 run-dev: ## Run the application in development mode with auto-reload
-	ENVIRONMENT=development uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src
+	cd $(BACKEND_DIR) && ENVIRONMENT=development uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src
 
 format: ## Format code using Ruff
-	env -u FORCE_COLOR uv run nox -s fmt
+	cd $(BACKEND_DIR) && env -u FORCE_COLOR uv run nox -s fmt
 
 test: ## Run tests using pytest
-	env -u FORCE_COLOR uv run nox -s test
+	cd $(BACKEND_DIR) && env -u FORCE_COLOR uv run nox -s test
 
 test-cov: ## Run tests with coverage report
-	uv run pytest --cov=src --cov-report=html --cov-report=term
+	cd $(BACKEND_DIR) && uv run pytest --cov=src --cov-report=html --cov-report=term
 
 docker-dev-up: ## Start development Docker services
-	docker-compose --env-file .env.development -f docker-compose.dev.yml up -d
+	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_DEV_COMPOSE) up -d
 
 docker-dev-down: ## Stop development Docker services
-	docker-compose --env-file .env.development -f docker-compose.dev.yml down -v
+	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_DEV_COMPOSE) down -v
 
 docker-dev-logs: ## View development Docker services logs
-	docker-compose --env-file .env.development -f docker-compose.dev.yml logs -f
+	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_DEV_COMPOSE) logs -f
 
 docker-dev-restart: ## Restart development Docker services
-	docker-compose --env-file .env.development -f docker-compose.dev.yml restart
+	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_DEV_COMPOSE) restart
 
 docker-dev-pause: ## Pause development Docker services
-	docker-compose --env-file .env.development -f docker-compose.dev.yml stop
+	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_DEV_COMPOSE) stop
 
 docker-up: ## Start production Docker services
-	docker-compose -f docker-compose.yml up -d
+	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_COMPOSE) up -d
 
 docker-down: ## Stop production Docker services
-	docker-compose -f docker-compose.yml down
+	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_COMPOSE) down
 
 docker-logs: ## View production Docker services logs
-	docker-compose -f docker-compose.yml logs -f
+	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_COMPOSE) logs -f
 
 docker-restart: ## Restart production Docker services
-	docker-compose -f docker-compose.yml restart
+	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_COMPOSE) restart
 
 migration-create: ## Create a new migration (usage: make migration-create MESSAGE="migration message")
 	@if [ -z "$(MESSAGE)" ]; then \
 		echo "Error: MESSAGE is required. Usage: make migration-create MESSAGE=\"your message\""; \
 		exit 1; \
 	fi
-	ENVIRONMENT=development uv run alembic revision --autogenerate -m "$(MESSAGE)"
+	cd $(BACKEND_DIR) && ENVIRONMENT=development uv run alembic revision --autogenerate -m "$(MESSAGE)"
 
 migration-upgrade: ## Upgrade database to the latest migration
-	ENVIRONMENT=development uv run alembic upgrade head
+	cd $(BACKEND_DIR) && ENVIRONMENT=development uv run alembic upgrade head
 
 migration-downgrade: ## Downgrade database by one revision
-	ENVIRONMENT=development uv run alembic downgrade -1
+	cd $(BACKEND_DIR) && ENVIRONMENT=development uv run alembic downgrade -1
 
 migration-current: ## Show current database revision
-	ENVIRONMENT=development uv run alembic current
+	cd $(BACKEND_DIR) && ENVIRONMENT=development uv run alembic current
 
 migration-history: ## Show migration history
-	ENVIRONMENT=development uv run alembic history
+	cd $(BACKEND_DIR) && ENVIRONMENT=development uv run alembic history
 
 pre-commit-install: ## Install pre-commit hooks
-	uv run pre-commit install
+	cd $(BACKEND_DIR) && uv run pre-commit install
 
 pre-commit-run: ## Run pre-commit hooks on all files
-	uv run pre-commit run --all-files
+	cd $(BACKEND_DIR) && uv run pre-commit run --all-files
 
 createsuperuser: ## Create a superuser account (interactive)
-	uv run python -m src.cli createsuperuser
+	cd $(BACKEND_DIR) && uv run python -m src.cli createsuperuser

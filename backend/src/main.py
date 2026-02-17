@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import logfire
 from fastapi import FastAPI
@@ -16,6 +17,10 @@ from src.core.config import PROJECT_INFO, settings
 from src.web import router as web_router
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SECURITY_LOG_FILE = str(PROJECT_ROOT / "security.log")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Lifespan context manager for FastAPI app."""
@@ -26,7 +31,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
 
 config = SecurityConfig(
     blocked_user_agents=["curl", "wget"],
-    custom_log_file="security.log",
+    custom_log_file=SECURITY_LOG_FILE,
     rate_limit=100,
     rate_limit_window=60,
     enable_redis=True,

@@ -16,6 +16,13 @@ A RAG (Retrieval-Augmented Generation) tool for querying astrophysics papers fro
 
 Most RAG projects rely on high-level wrappers like LangChain. This project intentionally avoids high-levels wrappers like LangChain or LlamaIndex. I wanted to maintain transparency, have a lot of flexbility and having more fun building the logic from scratch.
 
+## Repository Layout
+
+- `backend/`: FastAPI app, tests, migrations, scripts, and Python project files.
+- `infra/`: Docker Compose, LiteLLM, Grafana, and Prometheus configuration.
+- `frontend/`: Reserved for frontend app code.
+- `deployment/`: Reserved for deployment manifests and automation.
+
 ## Roadmap
 
 * [x] Initial Scaffolding

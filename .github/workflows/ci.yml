@@ -32,9 +32,11 @@ jobs:
           python-version: "3.13"
 
       - name: Install dependencies
+        working-directory: backend
         run: uv sync --all-groups
 
       - name: Load environment variables
+        working-directory: backend
         run: |
           set -a
           source ci.env
@@ -42,10 +44,11 @@ jobs:
           env | grep -E '^(ENVIRONMENT|LOGFIRE_TOKEN|DATABASE_|REDIS_|JWT_|LITELLM_|DEBUG|ACCESS_TOKEN_|ALLOWED_ORIGINS)' >> $GITHUB_ENV
 
       - name: Run tests
+        working-directory: backend
         run: uv run nox -s test -- --junitxml junit.xml
 
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
         with:
-          files: junit.xml
+          files: backend/junit.xml
