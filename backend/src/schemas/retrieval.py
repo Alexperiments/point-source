@@ -30,6 +30,7 @@ class RetrievedChunk(BaseModel):
     text_rank: int | None = None
     vector_rank: int | None = None
     rrf_score: float = 0.0
+    relevance_score: float | None = None
     citations: list[str] = Field(default_factory=list)
 
     @property

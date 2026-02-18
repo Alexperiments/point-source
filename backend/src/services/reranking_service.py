@@ -191,6 +191,8 @@ class RerankingService:
             return []
 
         scores = self.model.score(query, [candidate.text for candidate in candidates])
+        for index, candidate in enumerate(candidates):
+            candidate.relevance_score = float(scores[index])
 
         ranked = sorted(
             enumerate(candidates),

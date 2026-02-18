@@ -61,6 +61,20 @@ def test_rerank_limits_candidates_to_top_k(monkeypatch) -> None:
     assert reranked == candidates[:2]
 
 
+def test_rerank_populates_relevance_score(monkeypatch) -> None:
+    """Reranking should attach model relevance scores to candidates."""
+    monkeypatch.setattr(RERANKER_SETTINGS, "enabled", True)
+    monkeypatch.setattr(RERANKER_SETTINGS, "top_k", 4)
+
+    service = RerankingService(model=_StaticReranker())
+    candidates = [_make_chunk(index) for index in range(4)]
+
+    reranked = service.rerank(query="test query", candidates=candidates)
+
+    assert [candidate.relevance_score for candidate in candidates] == [4.0, 3.0, 2.0, 1.0]
+    assert [candidate.relevance_score for candidate in reranked] == [4.0, 3.0, 2.0, 1.0]
+
+
 def test_get_reranking_model_defaults_to_model_backed_reranker() -> None:
     """Model names should resolve to the LiteLLM-backed reranker by default."""
     model = get_reranking_model(
