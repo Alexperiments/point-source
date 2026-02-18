@@ -4,54 +4,41 @@ from __future__ import annotations
 
 import asyncio
 import re
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from sqlalchemy import Float, bindparam, func, select
+from sqlalchemy import bindparam, func, select
 
-from src.core.rag_config import (
-    EMBEDDING_SETTINGS,
-    RERANKER_SETTINGS,
-    RETRIEVAL_SETTINGS,
-)
+from src.core.rag_config import EMBEDDING_SETTINGS, RETRIEVAL_SETTINGS
 from src.models.node import DocumentNode, TextNode
 from src.schemas.retrieval import RetrievalFilters, RetrievedChunk
 from src.services.embedding_service import (
     MLXQwen3EmbeddingService,
     get_embedding_service,
 )
+from src.services.reranking_service import RerankingService
 
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql import Select
 
-
-@dataclass
-class _Candidate:
-    chunk_id: Any
-    document_id: Any
-    source_id: str
-    text: str
-    node_metadata: dict[str, Any] | None
-    text_rank: int | None = None
-    vector_rank: int | None = None
-    rrf_score: float = 0.0
-
-    @property
-    def path(self) -> str | None:
-        if not self.node_metadata:
-            return None
-        return str(self.node_metadata.get("path") or "") or None
+_QUERY_WHITESPACE_RE = re.compile(r"\s+")
 
 
 class RetrievalService:
-    """Service for retrieving relevant chunks."""
+    """Retrieve relevant chunks for a query."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        reranker: RerankingService | None = None,
+    ) -> None:
         """Initialize the retrieval service."""
         self.session = session
         self._embedder: MLXQwen3EmbeddingService | None = None
+        self._reranker = reranker or RerankingService()
 
     async def retrieve(
         self,
@@ -61,40 +48,27 @@ class RetrievalService:
         use_prev_next: bool | None = None,
     ) -> list[RetrievedChunk]:
         """Retrieve relevant chunks for a query."""
-        normalized = self._normalize_query(query)
-        if not normalized:
+        normalized_query = self._normalize_query(query)
+        if not normalized_query:
             return []
+
+        embedding = await self._embed_query_async(normalized_query)
+        text_chunks = await self._text_candidates(normalized_query, filters)
+        vector_chunks = await self._vector_candidates(embedding, filters)
+
+        merged = self._rrf_merge(text_chunks, vector_chunks)
+        reranked = await asyncio.to_thread(
+            self._reranker.rerank,
+            normalized_query,
+            merged,
+        )
+        results = reranked[: RETRIEVAL_SETTINGS.top_n]
 
         include_neighbors = (
             use_prev_next
             if use_prev_next is not None
             else RETRIEVAL_SETTINGS.use_prev_next
         )
-
-        embedding = await self._embed_query_async(normalized)
-        # Keep query execution sequential since AsyncSession is not concurrency-safe.
-        text_rows = await self._text_candidates(normalized, filters)
-        vector_rows = await self._vector_candidates(embedding, filters)
-        merged = self._rrf_merge(text_rows, vector_rows)
-        reranked = self._mock_rerank(normalized, merged)
-
-        reranked = reranked[: RETRIEVAL_SETTINGS.top_n]
-
-        results = [
-            RetrievedChunk(
-                chunk_id=c.chunk_id,
-                document_id=c.document_id,
-                source_id=c.source_id,
-                path=c.path,
-                text=c.text,
-                text_rank=c.text_rank,
-                vector_rank=c.vector_rank,
-                rrf_score=c.rrf_score,
-                citations=[c.source_id],
-            )
-            for c in reranked
-        ]
-
         if include_neighbors and results:
             await self._expand_with_neighbors(results)
 
@@ -102,7 +76,7 @@ class RetrievalService:
 
     @staticmethod
     def _normalize_query(query: str) -> str:
-        return re.compile(r"\s+").sub(" ", query).strip()
+        return _QUERY_WHITESPACE_RE.sub(" ", query).strip()
 
     def _get_embedder(self) -> MLXQwen3EmbeddingService:
         if self._embedder is None:
@@ -124,19 +98,18 @@ class RetrievalService:
         self,
         query: str,
         filters: RetrievalFilters | None,
-    ) -> list[Any]:
+    ) -> list[RetrievedChunk]:
         ts_query = func.websearch_to_tsquery("simple", bindparam("query"))
         ts_vector = func.to_tsvector("simple", TextNode.text)
         ts_rank = func.ts_rank_cd(ts_vector, ts_query)
 
         stmt = (
             select(
-                TextNode.id.label("chunk_id"),
-                TextNode.document_id.label("document_id"),
-                DocumentNode.source_id.label("source_id"),
-                TextNode.text.label("text"),
-                TextNode.node_metadata.label("node_metadata"),
-                ts_rank.label("text_rank"),
+                TextNode.id,
+                TextNode.document_id,
+                DocumentNode.source_id,
+                TextNode.text,
+                TextNode.node_metadata,
             )
             .join(DocumentNode, TextNode.document_id == DocumentNode.id)
             .where(TextNode.text != "")
@@ -144,36 +117,65 @@ class RetrievalService:
             .order_by(ts_rank.desc())
             .limit(RETRIEVAL_SETTINGS.text_top_k)
         )
-
         stmt = self._apply_filters(stmt, filters)
-        result = await self.session.execute(stmt.params(query=query))
-        return list(result.all())
+        rows = await self.session.execute(stmt.params(query=query))
+
+        chunks: list[RetrievedChunk] = []
+        for chunk_id, document_id, source_id, text, metadata in rows.tuples():
+            chunks.append(
+                RetrievedChunk(
+                    chunk_id=chunk_id,
+                    document_id=document_id,
+                    source_id=source_id,
+                    path=self._metadata_path(metadata),
+                    text=text,
+                    citations=[source_id],
+                ),
+            )
+        return chunks
 
     async def _vector_candidates(
         self,
         embedding: list[float],
         filters: RetrievalFilters | None,
-    ) -> list[Any]:
+    ) -> list[RetrievedChunk]:
         distance = TextNode.embedding.op("<=>")(bindparam("embedding"))
 
         stmt = (
             select(
-                TextNode.id.label("chunk_id"),
-                TextNode.document_id.label("document_id"),
-                DocumentNode.source_id.label("source_id"),
-                TextNode.text.label("text"),
-                TextNode.node_metadata.label("node_metadata"),
-                func.cast(distance, Float).label("distance"),
+                TextNode.id,
+                TextNode.document_id,
+                DocumentNode.source_id,
+                TextNode.text,
+                TextNode.node_metadata,
             )
             .join(DocumentNode, TextNode.document_id == DocumentNode.id)
             .where(TextNode.text != "", TextNode.embedding.is_not(None))
             .order_by(distance)
             .limit(RETRIEVAL_SETTINGS.vector_top_k)
         )
-
         stmt = self._apply_filters(stmt, filters)
-        result = await self.session.execute(stmt.params(embedding=embedding))
-        return list(result.all())
+        rows = await self.session.execute(stmt.params(embedding=embedding))
+
+        chunks: list[RetrievedChunk] = []
+        for chunk_id, document_id, source_id, text, metadata in rows.tuples():
+            chunks.append(
+                RetrievedChunk(
+                    chunk_id=chunk_id,
+                    document_id=document_id,
+                    source_id=source_id,
+                    path=self._metadata_path(metadata),
+                    text=text,
+                    citations=[source_id],
+                ),
+            )
+        return chunks
+
+    @staticmethod
+    def _metadata_path(node_metadata: dict[str, object] | None) -> str | None:
+        if not node_metadata:
+            return None
+        return str(node_metadata.get("path") or "") or None
 
     @staticmethod
     def _apply_filters(
@@ -190,134 +192,131 @@ class RetrievalService:
         # emit nonexistent categories, which zeroes out results.
         return stmt
 
-    @staticmethod
-    def _rrf_merge(text_rows: list[Any], vector_rows: list[Any]) -> list[_Candidate]:
-        candidates: dict[Any, _Candidate] = {}
+    def _rrf_merge(
+        self,
+        text_chunks: list[RetrievedChunk],
+        vector_chunks: list[RetrievedChunk],
+    ) -> list[RetrievedChunk]:
+        candidates: dict[UUID, RetrievedChunk] = {}
 
-        for rank, row in enumerate(text_rows, start=1):
-            candidate = candidates.get(row.chunk_id)
+        for rank, chunk in enumerate(text_chunks, start=1):
+            candidate = candidates.get(chunk.chunk_id)
             if candidate is None:
-                candidate = _Candidate(
-                    chunk_id=row.chunk_id,
-                    document_id=row.document_id,
-                    source_id=row.source_id,
-                    text=row.text,
-                    node_metadata=row.node_metadata,
-                )
-                candidates[row.chunk_id] = candidate
+                candidate = chunk.model_copy(deep=True)
+                candidates[chunk.chunk_id] = candidate
             candidate.text_rank = rank
 
-        for rank, row in enumerate(vector_rows, start=1):
-            candidate = candidates.get(row.chunk_id)
+        for rank, chunk in enumerate(vector_chunks, start=1):
+            candidate = candidates.get(chunk.chunk_id)
             if candidate is None:
-                candidate = _Candidate(
-                    chunk_id=row.chunk_id,
-                    document_id=row.document_id,
-                    source_id=row.source_id,
-                    text=row.text,
-                    node_metadata=row.node_metadata,
-                )
-                candidates[row.chunk_id] = candidate
+                candidate = chunk.model_copy(deep=True)
+                candidates[chunk.chunk_id] = candidate
             candidate.vector_rank = rank
 
         for candidate in candidates.values():
-            score = 0.0
-            if candidate.text_rank is not None:
-                score += RETRIEVAL_SETTINGS.text_weight / (
-                    RETRIEVAL_SETTINGS.rrf_k + candidate.text_rank
-                )
-            if candidate.vector_rank is not None:
-                score += RETRIEVAL_SETTINGS.semantic_weight / (
-                    RETRIEVAL_SETTINGS.rrf_k + candidate.vector_rank
-                )
-            candidate.rrf_score = score
+            candidate.rrf_score = self._rrf_score(
+                text_rank=candidate.text_rank,
+                vector_rank=candidate.vector_rank,
+            )
 
         return sorted(
             candidates.values(),
-            key=lambda c: c.rrf_score,
+            key=lambda item: item.rrf_score,
             reverse=True,
         )
 
     @staticmethod
-    def _mock_rerank(query: str, candidates: list[_Candidate]) -> list[_Candidate]:
-        del query
-        if not RERANKER_SETTINGS.enabled:
-            return candidates
-        return candidates[: RERANKER_SETTINGS.top_k]
+    def _rrf_score(
+        *,
+        text_rank: int | None,
+        vector_rank: int | None,
+    ) -> float:
+        score = 0.0
+        if text_rank is not None:
+            score += RETRIEVAL_SETTINGS.text_weight / (
+                RETRIEVAL_SETTINGS.rrf_k + text_rank
+            )
+        if vector_rank is not None:
+            score += RETRIEVAL_SETTINGS.semantic_weight / (
+                RETRIEVAL_SETTINGS.rrf_k + vector_rank
+            )
+        return score
 
-    async def _expand_with_neighbors(self, results: list[RetrievedChunk]) -> None:
-        ids = [r.chunk_id for r in results]
-        if not ids:
+    async def _expand_with_neighbors(self, chunks: list[RetrievedChunk]) -> None:
+        chunk_ids = [chunk.chunk_id for chunk in chunks]
+        if not chunk_ids:
             return
 
-        base = await self._load_base_chunks(ids)
+        base = await self._load_base_chunks(chunk_ids)
         prev_texts = await self._load_prev_texts(base)
-        next_texts = await self._load_next_texts(ids)
+        next_texts = await self._load_next_texts(chunk_ids)
 
-        for item in results:
-            row = base.get(item.chunk_id)
-            if row is None:
+        for chunk in chunks:
+            base_row = base.get(chunk.chunk_id)
+            if base_row is None:
                 continue
-            item.text = self._merge_neighbor_texts(
-                item,
-                row_text=row.text,
-                prev_text=prev_texts.get(row.prev_id),
-                next_text=next_texts.get(item.chunk_id),
+            chunk.text = self._merge_neighbor_texts(
+                current_text=base_row[0] or chunk.text,
+                prev_text=prev_texts.get(base_row[1]),
+                next_text=next_texts.get(chunk.chunk_id),
             )
 
-    async def _load_base_chunks(self, ids: list[Any]) -> dict[Any, Any]:
-        base_stmt = select(
-            TextNode.id.label("chunk_id"),
-            TextNode.text.label("text"),
-            TextNode.prev_id.label("prev_id"),
-        ).where(TextNode.id.in_(ids))
-        base_rows = await self.session.execute(base_stmt)
-        return {row.chunk_id: row for row in base_rows}
+    async def _load_base_chunks(
+        self,
+        chunk_ids: list[UUID],
+    ) -> dict[UUID, tuple[str | None, UUID | None]]:
+        stmt = select(
+            TextNode.id,
+            TextNode.text,
+            TextNode.prev_id,
+        ).where(TextNode.id.in_(chunk_ids))
+        rows = await self.session.execute(stmt)
+        return {chunk_id: (text, prev_id) for chunk_id, text, prev_id in rows.tuples()}
 
-    async def _load_prev_texts(self, base: dict[Any, Any]) -> dict[Any, str]:
-        prev_ids = [row.prev_id for row in base.values() if row.prev_id]
+    async def _load_prev_texts(
+        self,
+        base: dict[UUID, tuple[str | None, UUID | None]],
+    ) -> dict[UUID, str]:
+        prev_ids = [prev_id for _, prev_id in base.values() if prev_id is not None]
         if not prev_ids:
             return {}
-        prev_stmt = select(
-            TextNode.id.label("chunk_id"),
-            TextNode.text.label("text"),
-        ).where(TextNode.id.in_(prev_ids))
-        prev_rows = await self.session.execute(prev_stmt)
-        return {row.chunk_id: row.text for row in prev_rows if row.text is not None}
 
-    async def _load_next_texts(self, ids: list[Any]) -> dict[Any, str]:
-        next_stmt = select(
-            TextNode.prev_id.label("prev_id"),
-            TextNode.text.label("text"),
-        ).where(TextNode.prev_id.in_(ids))
-        next_rows = await self.session.execute(next_stmt)
-        next_texts: dict[Any, str] = {}
-        for row in next_rows:
-            if row.prev_id is None or row.text is None:
+        stmt = select(
+            TextNode.id,
+            TextNode.text,
+        ).where(TextNode.id.in_(prev_ids))
+        rows = await self.session.execute(stmt)
+        return {chunk_id: text for chunk_id, text in rows.tuples() if text is not None}
+
+    async def _load_next_texts(self, chunk_ids: list[UUID]) -> dict[UUID, str]:
+        stmt = select(
+            TextNode.prev_id,
+            TextNode.text,
+        ).where(TextNode.prev_id.in_(chunk_ids))
+        rows = await self.session.execute(stmt)
+
+        next_texts: dict[UUID, str] = {}
+        for prev_id, text in rows.tuples():
+            if prev_id is None or text is None:
                 continue
-            next_texts.setdefault(row.prev_id, row.text)
+            next_texts.setdefault(prev_id, text)
         return next_texts
 
     @staticmethod
     def _merge_neighbor_texts(
-        item: RetrievedChunk,
+        current_text: str,
         *,
-        row_text: str | None,
         prev_text: str | None,
         next_text: str | None,
     ) -> str:
         parts: list[str] = []
         if prev_text:
             parts.append(prev_text)
-
-        current_text = row_text or item.text
-        if current_text:
-            parts.append(current_text)
-
+        parts.append(current_text)
         if next_text:
             parts.append(next_text)
 
         merged = "\n\n".join(parts)
         if len(merged) > RETRIEVAL_SETTINGS.max_merged_chars:
-            merged = merged[: RETRIEVAL_SETTINGS.max_merged_chars]
-        return merged or item.text
+            return merged[: RETRIEVAL_SETTINGS.max_merged_chars]
+        return merged

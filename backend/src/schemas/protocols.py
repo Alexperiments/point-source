@@ -29,3 +29,11 @@ class TokenizerService(Protocol):
     def tokenize_with_offsets_mapping(self, text: str) -> TokenOffsets:
         """Tokenize the input string returning an offsets mapping."""
         ...
+
+
+class Reranker(Protocol):
+    """Reranker protocol."""
+
+    def score(self, query: str, passages: list[str]) -> list[float]:
+        """Return relevance scores for each passage given the query."""
+        ...

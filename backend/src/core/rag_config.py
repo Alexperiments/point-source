@@ -113,7 +113,7 @@ class RetrievalSettings(BaseSettings):
         env_prefix="RETRIEVAL_",
     )
 
-    top_n: int = Field(default=5)
+    top_n: int = Field(default=64)
     text_top_k: int = Field(default=50)
     vector_top_k: int = Field(default=50)
     rrf_k: int = Field(default=60)
@@ -138,9 +138,9 @@ class RerankerSettings(BaseSettings):
     )
 
     enabled: bool = Field(default=True)
-    model_name: str = Field(default="mock-reranker")
+    model_name: str = Field(default="jina-reranker")
+    timeout_seconds: int = Field(default=30, ge=1)
     top_k: int = Field(default=5)
-    batch_size: int = Field(default=8)
 
 
 class AgentSettings(BaseSettings):
