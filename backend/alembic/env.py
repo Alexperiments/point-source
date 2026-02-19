@@ -1,7 +1,7 @@
 import asyncio
 from sqlalchemy.ext.asyncio import create_async_engine
 import src.models
-import evaluation.embedding.models  # ensure evaluation tables are in Base.metadata
+import evaluation.embedding.models
 from alembic import context
 from src.core.config import settings
 from src.core.database.base import Base
