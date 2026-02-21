@@ -4,17 +4,7 @@ import re
 import uuid
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
-
-
-class RetrievalFilters(BaseModel):
-    """Optional filters for retrieval."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    document_id: uuid.UUID | None = None
-    source_id: str | None = None
-    category: str | None = None
+from pydantic import BaseModel, ConfigDict, HttpUrl
 
 
 class RetrievedChunk(BaseModel):
@@ -23,15 +13,14 @@ class RetrievedChunk(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     chunk_id: uuid.UUID
-    document_id: uuid.UUID
-    source_id: str
+    document_id: str
+    url: HttpUrl
     path: str | None = None
     text: str
     text_rank: int | None = None
     vector_rank: int | None = None
     rrf_score: float = 0.0
     relevance_score: float | None = None
-    citations: list[str] = Field(default_factory=list)
 
     @property
     def text_snippet(self) -> str:
@@ -42,7 +31,7 @@ class RetrievedChunk(BaseModel):
     def __repr__(self) -> str:
         path = self.path or ""
         snippet = self.text_snippet
-        return f"[{self.source_id}] {path} — {snippet}"
+        return f"[{self.url}] {path} — {snippet}"
 
     def to_cache_dict(self) -> dict[str, Any]:
         """Serialize for caching."""

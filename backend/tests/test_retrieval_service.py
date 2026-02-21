@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.core.rag_config import RETRIEVAL_SETTINGS
-from src.schemas.retrieval import RetrievalFilters, RetrievedChunk
+from src.schemas.retrieval import RetrievedChunk
 from src.services.retrieval_service import RetrievalService
 
 
@@ -17,14 +17,13 @@ class _DummySession:
         raise AssertionError(msg)
 
 
-def _chunk(name: str, *, source_id: str = "paper-1", path: str | None = None) -> RetrievedChunk:
+def _chunk(name: str, *, url: str = "https://arxiv.org/abs/paper-1", path: str | None = None) -> RetrievedChunk:
     return RetrievedChunk(
         chunk_id=uuid.uuid5(uuid.NAMESPACE_DNS, f"chunk-{name}"),
-        document_id=uuid.uuid5(uuid.NAMESPACE_DNS, f"doc-{name}"),
-        source_id=source_id,
+        document_id=f"doc-{name}",
+        url=url,
         path=path,
         text=f"text-{name}",
-        citations=[source_id],
     )
 
 
@@ -65,10 +64,9 @@ async def test_retrieve_returns_empty_for_blank_queries(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_retrieve_normalizes_query_and_passes_filters(monkeypatch) -> None:
+async def test_retrieve_normalizes_query_and_calls_candidates(monkeypatch) -> None:
     reranker = _RecordingReranker()
     service = RetrievalService(session=_DummySession(), reranker=reranker)
-    filters = RetrievalFilters(source_id="paper-x")
 
     embed_mock = AsyncMock(return_value=[0.3, 0.7])
     text_mock = AsyncMock(return_value=[])
@@ -78,11 +76,11 @@ async def test_retrieve_normalizes_query_and_passes_filters(monkeypatch) -> None
     monkeypatch.setattr(service, "_text_candidates", text_mock)
     monkeypatch.setattr(service, "_vector_candidates", vector_mock)
 
-    await service.retrieve("  graph\n   theory   ", filters=filters)
+    await service.retrieve("  graph\n   theory   ")
 
     embed_mock.assert_awaited_once_with("graph theory")
-    text_mock.assert_awaited_once_with("graph theory", filters)
-    vector_mock.assert_awaited_once_with([0.3, 0.7], filters)
+    text_mock.assert_awaited_once_with("graph theory")
+    vector_mock.assert_awaited_once_with([0.3, 0.7])
     assert reranker.calls[0][0] == "graph theory"
 
 
@@ -93,9 +91,9 @@ def test_rrf_merge_dedupes_and_ranks(monkeypatch) -> None:
 
     service = RetrievalService(session=_DummySession(), reranker=_RecordingReranker())
 
-    chunk_a = _chunk("a", source_id="doc-a", path="/a")
-    chunk_b = _chunk("b", source_id="doc-b", path="/b")
-    chunk_c = _chunk("c", source_id="doc-c", path="/c")
+    chunk_a = _chunk("a", url="https://arxiv.org/abs/doc-a", path="/a")
+    chunk_b = _chunk("b", url="https://arxiv.org/abs/doc-b", path="/b")
+    chunk_c = _chunk("c", url="https://arxiv.org/abs/doc-c", path="/c")
 
     merged = service._rrf_merge(
         text_chunks=[chunk_a, chunk_b],
@@ -112,7 +110,7 @@ def test_rrf_merge_dedupes_and_ranks(monkeypatch) -> None:
     assert by_id[chunk_b.chunk_id].text_rank == 2
     assert by_id[chunk_b.chunk_id].vector_rank == 1
     assert by_id[chunk_b.chunk_id].path == "/b"
-    assert by_id[chunk_b.chunk_id].citations == ["doc-b"]
+    assert str(by_id[chunk_b.chunk_id].url) == "https://arxiv.org/abs/doc-b"
 
     assert by_id[chunk_b.chunk_id].rrf_score == pytest.approx(
         (0.3 / (60 + 2)) + (0.7 / (60 + 1)),

@@ -15,13 +15,11 @@ from src.services.reranking_service import (
 
 
 def _make_chunk(index: int) -> RetrievedChunk:
-    source_id = f"source-{index}"
     return RetrievedChunk(
         chunk_id=uuid.uuid4(),
-        document_id=uuid.uuid4(),
-        source_id=source_id,
+        document_id=f"doc-{index}",
+        url=f"https://arxiv.org/abs/source-{index}",
         text=f"text-{index}",
-        citations=[source_id],
     )
 
 

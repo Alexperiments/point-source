@@ -10,7 +10,7 @@ from sqlalchemy import bindparam, func, select
 
 from src.core.rag_config import EMBEDDING_SETTINGS, RETRIEVAL_SETTINGS
 from src.models.node import DocumentNode, TextNode
-from src.schemas.retrieval import RetrievalFilters, RetrievedChunk
+from src.schemas.retrieval import RetrievedChunk
 from src.services.embedding_service import (
     MLXQwen3EmbeddingService,
     get_embedding_service,
@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from sqlalchemy.ext.asyncio import AsyncSession
-    from sqlalchemy.sql import Select
 
 _QUERY_WHITESPACE_RE = re.compile(r"\s+")
 
@@ -44,7 +43,6 @@ class RetrievalService:
         self,
         query: str,
         *,
-        filters: RetrievalFilters | None = None,
         use_prev_next: bool | None = None,
     ) -> list[RetrievedChunk]:
         """Retrieve relevant chunks for a query."""
@@ -53,8 +51,8 @@ class RetrievalService:
             return []
 
         embedding = await self._embed_query_async(normalized_query)
-        text_chunks = await self._text_candidates(normalized_query, filters)
-        vector_chunks = await self._vector_candidates(embedding, filters)
+        text_chunks = await self._text_candidates(normalized_query)
+        vector_chunks = await self._vector_candidates(embedding)
 
         merged = self._rrf_merge(text_chunks, vector_chunks)
         reranked = await asyncio.to_thread(
@@ -97,7 +95,6 @@ class RetrievalService:
     async def _text_candidates(
         self,
         query: str,
-        filters: RetrievalFilters | None,
     ) -> list[RetrievedChunk]:
         ts_query = func.websearch_to_tsquery("simple", bindparam("query"))
         ts_vector = func.to_tsvector("simple", TextNode.text)
@@ -107,7 +104,7 @@ class RetrievalService:
             select(
                 TextNode.id,
                 TextNode.document_id,
-                DocumentNode.source_id,
+                DocumentNode.url,
                 TextNode.text,
                 TextNode.node_metadata,
             )
@@ -117,19 +114,17 @@ class RetrievalService:
             .order_by(ts_rank.desc())
             .limit(RETRIEVAL_SETTINGS.text_top_k)
         )
-        stmt = self._apply_filters(stmt, filters)
         rows = await self.session.execute(stmt.params(query=query))
 
         chunks: list[RetrievedChunk] = []
-        for chunk_id, document_id, source_id, text, metadata in rows.tuples():
+        for chunk_id, document_id, url, text, metadata in rows.tuples():
             chunks.append(
                 RetrievedChunk(
                     chunk_id=chunk_id,
                     document_id=document_id,
-                    source_id=source_id,
+                    url=url,
                     path=self._metadata_path(metadata),
                     text=text,
-                    citations=[source_id],
                 ),
             )
         return chunks
@@ -137,7 +132,6 @@ class RetrievalService:
     async def _vector_candidates(
         self,
         embedding: list[float],
-        filters: RetrievalFilters | None,
     ) -> list[RetrievedChunk]:
         distance = TextNode.embedding.op("<=>")(bindparam("embedding"))
 
@@ -145,7 +139,7 @@ class RetrievalService:
             select(
                 TextNode.id,
                 TextNode.document_id,
-                DocumentNode.source_id,
+                DocumentNode.url,
                 TextNode.text,
                 TextNode.node_metadata,
             )
@@ -154,19 +148,17 @@ class RetrievalService:
             .order_by(distance)
             .limit(RETRIEVAL_SETTINGS.vector_top_k)
         )
-        stmt = self._apply_filters(stmt, filters)
         rows = await self.session.execute(stmt.params(embedding=embedding))
 
         chunks: list[RetrievedChunk] = []
-        for chunk_id, document_id, source_id, text, metadata in rows.tuples():
+        for chunk_id, document_id, url, text, metadata in rows.tuples():
             chunks.append(
                 RetrievedChunk(
                     chunk_id=chunk_id,
                     document_id=document_id,
-                    source_id=source_id,
+                    url=url,
                     path=self._metadata_path(metadata),
                     text=text,
-                    citations=[source_id],
                 ),
             )
         return chunks
@@ -176,21 +168,6 @@ class RetrievalService:
         if not node_metadata:
             return None
         return str(node_metadata.get("path") or "") or None
-
-    @staticmethod
-    def _apply_filters(
-        stmt: Select[tuple[object, ...]],
-        filters: RetrievalFilters | None,
-    ) -> Select[tuple[object, ...]]:
-        if filters is None:
-            return stmt
-        if filters.document_id is not None:
-            stmt = stmt.where(TextNode.document_id == filters.document_id)
-        if filters.source_id is not None:
-            stmt = stmt.where(DocumentNode.source_id == filters.source_id)
-        # TODO: Category filtering disabled for now because the model can  # noqa: FIX002, TD002, TD003
-        # emit nonexistent categories, which zeroes out results.
-        return stmt
 
     def _rrf_merge(
         self,
