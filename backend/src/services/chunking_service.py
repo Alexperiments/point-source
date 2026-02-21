@@ -530,19 +530,21 @@ class MarkdownChunker:
         documents: Sequence[DocumentNode],
         *,
         metadata: dict[str, object] | None = None,
-    ) -> None:
-        """Chunk documents into TextNode trees rooted at each DocumentNode."""
+    ) -> list[TextNode]:
+        """Chunk documents and return newly created TextNode objects."""
         with logfire.span(f"chunking {len(documents)} documents."):
-            self._chunk_internal(documents, metadata=metadata)
+            nodes = self._chunk_internal(documents, metadata=metadata)
             logfire.info("documents_chunking completed")
+            return nodes
 
     def _chunk_internal(
         self,
         documents: Sequence[DocumentNode],
         *,
         metadata: dict[str, object] | None = None,
-    ) -> None:
+    ) -> list[TextNode]:
         base_md = dict(metadata) if metadata else None
+        created_nodes: list[TextNode] = []
 
         for doc in documents:
             text = doc.text
@@ -591,6 +593,7 @@ class MarkdownChunker:
                     and combined
                     and len(combined) < self._min_chunk_chars
                 )
+                part_children: list[TextNode] = []
                 if should_carry:
                     carry_text = combined
                     node.text = ""
@@ -608,7 +611,7 @@ class MarkdownChunker:
                         span = section_span
                         span_offsets = offsets
 
-                    self._assign_or_split(
+                    part_children = self._assign_or_split(
                         node=node,
                         full_text=full_text,
                         span=span,
@@ -617,8 +620,11 @@ class MarkdownChunker:
                     )
                     carry_text = ""
 
-                doc.children.append(node)
+                created_nodes.append(node)
+                created_nodes.extend(part_children)
                 stack.append(_StackEntry(h.level, node, path))
+
+        return created_nodes
 
     def _extract_headings(self, text: str) -> list[_Heading]:
         return [
@@ -649,15 +655,15 @@ class MarkdownChunker:
         span: _Span,
         token_offsets: TokenOffsets,
         base_metadata: dict[str, object] | None,
-    ) -> None:
+    ) -> list[TextNode]:
         if span.empty():
             node.text = ""
-            return
+            return []
 
         token_count = token_offsets.count_tokens_from_span(span.start, span.end)
         if token_count <= self._max_tokens:
             node.text = full_text[span.start : span.end]
-            return
+            return []
 
         chunks = self._strategy.split_oversized_span(
             token_offsets=token_offsets,
@@ -670,11 +676,12 @@ class MarkdownChunker:
         chunks = [c for c in chunks if c]
         node.text = ""
         if chunks:
-            self._create_part_children(
+            return self._create_part_children(
                 parent=node,
                 chunks=chunks,
                 base_metadata=base_metadata,
             )
+        return []
 
     def _create_part_children(
         self,
@@ -682,15 +689,17 @@ class MarkdownChunker:
         parent: TextNode,
         chunks: list[str],
         base_metadata: dict[str, object] | None,
-    ) -> None:
+    ) -> list[TextNode]:
         parent_path = self._node_path(parent)
         prev: TextNode | None = None
+        created_children: list[TextNode] = []
 
         for i, chunk in enumerate(chunks, start=1):
             title = f"part {i}"
             path = self._join_path(parent_path, title)
 
             child = TextNode(text=chunk)
+            child.document = parent.document
             child.parent = parent
             if base_metadata:
                 child.node_metadata = dict(base_metadata)
@@ -704,8 +713,9 @@ class MarkdownChunker:
                 child.prev_node = prev
                 prev.next_node = child
             prev = child
+            created_children.append(child)
 
-            parent.document.children.append(child)
+        return created_children
 
     # ---- node/metadata helpers
 

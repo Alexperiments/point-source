@@ -12,7 +12,11 @@ from src.models.node import DocumentNode, TextNode
 
 @pytest.fixture(scope="session")
 def engine():
-    engine = create_engine("sqlite:///:memory:", echo=False)
+    engine = create_engine(
+        "sqlite:///:memory:",
+        echo=False,
+        execution_options={"schema_translate_map": {"processed": None}},
+    )
     Base.metadata.create_all(engine)
     yield engine
     Base.metadata.drop_all(engine)
@@ -37,23 +41,24 @@ def session(engine):
 def sample_document_node(session):
     """Create and persist a sample document node."""
     doc = DocumentNode(
+        id="source-1",
+        url="https://arxiv.org/abs/source-1",
         text="Document content",
-        source_id="source-1",
     )
-    doc.node_metadata = {"doc_key": "doc_value"}
     session.add(doc)
     session.flush()
     return doc
 
 
 # ============================================================================
-# BaseNode Initialization (via TextNode)
+# TextNode Initialization
 # ============================================================================
 
-class TestBaseNodeInitialization:
-    def test_default_initialization(self, session):
+class TestTextNodeInitialization:
+    def test_default_initialization(self, session, sample_document_node):
         """Test creating a TextNode with only required fields."""
         node = TextNode(text="Test")
+        node.document = sample_document_node
         session.add(node)
         session.flush()
 
@@ -61,13 +66,14 @@ class TestBaseNodeInitialization:
         assert node.text == "Test"
         assert node.node_metadata is None
         assert node.embedding is None
-        assert node.document_id is None
+        assert node.document_id == sample_document_node.id
         assert node.parent_id is None
         assert node.prev_id is None
 
-    def test_setting_metadata_and_embedding(self, session):
+    def test_setting_metadata_and_embedding(self, session, sample_document_node):
         """Test assigning metadata and embeddings after creation."""
         node = TextNode(text="Sample text")
+        node.document = sample_document_node
         node.node_metadata = {"key": "value"}
         node.embedding = [0.1] * 1024
         session.add(node)
@@ -82,9 +88,10 @@ class TestBaseNodeInitialization:
 # ============================================================================
 
 class TestStringRepresentation:
-    def test_repr_includes_id_text_and_metadata(self, session):
+    def test_repr_includes_id_text_and_metadata(self, session, sample_document_node):
         """Test that __repr__ includes node ID, text, and metadata."""
         node = TextNode(text="  Sample text  ")
+        node.document = sample_document_node
         node.node_metadata = {"key": "value"}
         session.add(node)
         session.flush()
@@ -101,9 +108,10 @@ class TestStringRepresentation:
 # ============================================================================
 
 class TestTextNodeRelationships:
-    def test_children_empty_by_default(self, session):
+    def test_children_empty_by_default(self, session, sample_document_node):
         """Test that a node with no children has an empty children list."""
         parent = TextNode(text="Parent")
+        parent.document = sample_document_node
         session.add(parent)
         session.flush()
 
@@ -169,18 +177,26 @@ class TestTextNodeRelationships:
 class TestDocumentNode:
     def test_creation_minimal(self, session):
         """Test creating a DocumentNode with required fields."""
-        node = DocumentNode(text="Document", source_id="source-1")
+        node = DocumentNode(
+            id="source-1",
+            url="https://arxiv.org/abs/source-1",
+            text="Document",
+        )
         session.add(node)
         session.flush()
 
-        assert node.id is not None
+        assert node.id == "source-1"
+        assert node.url == "https://arxiv.org/abs/source-1"
         assert node.text == "Document"
         assert node.source_id == "source-1"
-        assert node.node_metadata is None
 
     def test_children_relationship(self, session):
         """Test DocumentNode's relationship with TextNode children."""
-        doc = DocumentNode(text="Document", source_id="source-1")
+        doc = DocumentNode(
+            id="source-1",
+            url="https://arxiv.org/abs/source-1",
+            text="Document",
+        )
         session.add(doc)
         session.flush()
 
@@ -195,8 +211,12 @@ class TestDocumentNode:
         assert child.document_id == doc.id
         assert child in doc.children
 
-    def test_cascade_delete_document(self, session):
-        doc = DocumentNode(text="Document", source_id="source-1")
+    def test_delete_document_does_not_cascade_to_chunks(self, session):
+        doc = DocumentNode(
+            id="source-1",
+            url="https://arxiv.org/abs/source-1",
+            text="Document",
+        )
         child = TextNode(text="Child")
         child.document = doc
         session.add_all([doc, child])
@@ -206,7 +226,9 @@ class TestDocumentNode:
         session.flush()
         session.expunge_all()
 
-        assert session.get(TextNode, child.id) is None
+        persisted_child = session.get(TextNode, child.id)
+        assert persisted_child is not None
+        assert persisted_child.document_id == "source-1"
 
 
 # ============================================================================
@@ -214,17 +236,19 @@ class TestDocumentNode:
 # ============================================================================
 
 class TestEdgeCases:
-    def test_empty_text(self, session):
+    def test_empty_text(self, session, sample_document_node):
         """Test that empty text is allowed."""
         node = TextNode(text="")
+        node.document = sample_document_node
         session.add(node)
         session.flush()
 
         assert node.text == ""
 
-    def test_metadata_with_none_value(self, session):
+    def test_metadata_with_none_value(self, session, sample_document_node):
         """Test metadata with None as a value."""
         node = TextNode(text="Text")
+        node.document = sample_document_node
         node.node_metadata = {"key": None}
         session.add(node)
         session.flush()

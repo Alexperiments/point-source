@@ -1,10 +1,12 @@
 """Node structure definition and mapping to database."""
 
 import uuid
+from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
+    DateTime,
     ForeignKey,
     Text,
 )
@@ -16,6 +18,7 @@ from sqlalchemy.orm import (
     foreign,
     mapped_column,
     relationship,
+    synonym,
 )
 
 from src.core.database.base import Base
@@ -28,10 +31,14 @@ class NodeBase(MappedAsDataclass, DeclarativeBase):
     __abstract__ = True
 
 
-class BaseNode(NodeBase):
-    """Abstract text node interface."""
+class TextNode(NodeBase):
+    """Text Node Object.
 
-    __abstract__ = True
+    Generic interface for retrievable nodes containing text data.
+    """
+
+    __tablename__: str = "document_chunks"
+    __table_args__ = {"schema": "processed"}
 
     text: Mapped[str] = mapped_column(Text(), nullable=False)
 
@@ -56,20 +63,11 @@ class BaseNode(NodeBase):
         init=False,
     )
 
-
-class TextNode(BaseNode):
-    """Text Node Object.
-
-    Generic interface for retrievable nodes containing text data.
-    """
-
-    __tablename__: str = "document_chunks"
-
-    document_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("documents.id"),
-        nullable=True,
-        default=None,
+    document_id: Mapped[str] = mapped_column(
+        Text(),
+        ForeignKey("processed.documents.id"),
+        nullable=False,
+        init=False,
     )
     document: Mapped["DocumentNode"] = relationship(
         back_populates="children",
@@ -78,7 +76,7 @@ class TextNode(BaseNode):
 
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("document_chunks.id"),
+        ForeignKey("processed.document_chunks.id"),
         nullable=True,
         default=None,
     )
@@ -92,7 +90,7 @@ class TextNode(BaseNode):
 
     prev_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("document_chunks.id"),
+        ForeignKey("processed.document_chunks.id"),
         nullable=True,
         default=None,
     )
@@ -122,15 +120,43 @@ class TextNode(BaseNode):
     )
 
 
-class DocumentNode(BaseNode):
-    """Document node object."""
+class DocumentNode(NodeBase):
+    """Document object sourced from processed documents table."""
 
     __tablename__: str = "documents"
+    __table_args__ = {"schema": "processed"}
 
-    source_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    id: Mapped[str] = mapped_column(Text(), primary_key=True)
+    url: Mapped[str] = mapped_column(Text(), nullable=False)
+    authors: Mapped[str | None] = mapped_column(Text(), nullable=True, default=None)
+    title: Mapped[str | None] = mapped_column(Text(), nullable=True, default=None)
+    comments: Mapped[str | None] = mapped_column(Text(), nullable=True, default=None)
+    journal_ref: Mapped[str | None] = mapped_column(
+        Text(),
+        nullable=True,
+        default=None,
+    )
+    doi: Mapped[str | None] = mapped_column(Text(), nullable=True, default=None)
+    report_no: Mapped[str | None] = mapped_column(Text(), nullable=True, default=None)
+    categories: Mapped[str | None] = mapped_column(Text(), nullable=True, default=None)
+    license: Mapped[str | None] = mapped_column(Text(), nullable=True, default=None)
+    created: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+    last_updated: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+    )
+    text: Mapped[str | None] = mapped_column(Text(), nullable=True, default=None)
+
+    # Compatibility alias for callers that still reference source_id.
+    source_id = synonym("id")
 
     children: Mapped[list["TextNode"]] = relationship(
         back_populates="document",
-        cascade="all, delete-orphan",
         init=False,
+        viewonly=True,
     )
