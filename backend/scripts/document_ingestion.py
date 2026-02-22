@@ -6,7 +6,7 @@ import logfire
 from datasets import load_dataset
 
 from src.core.database.base import async_session
-from src.services.document_service import DocumentService
+from src.services.chunking_service import MarkdownChunker
 
 
 logfire.configure()
@@ -35,7 +35,7 @@ async def main() -> None:
         )
 
         async with async_session() as session:
-            service = DocumentService(
+            service = MarkdownChunker(
                 session=session,
             )
 

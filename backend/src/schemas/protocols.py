@@ -6,21 +6,7 @@ from typing import TYPE_CHECKING, Protocol
 
 
 if TYPE_CHECKING:
-    import numpy as np
-
     from src.services.tokenization_service import TokenOffsets
-
-
-class EmbeddingService(Protocol):
-    """Embedding service protocol."""
-
-    def encode_query(self, text_list: list[str], batch_size: int) -> np.ndarray:
-        """Embed the input list of queries with the embedding model."""
-        ...
-
-    def encode_document(self, text_list: list[str], batch_size: int) -> np.ndarray:
-        """Embed the input list of documents with the embedding model."""
-        ...
 
 
 class TokenizerService(Protocol):

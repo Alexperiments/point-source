@@ -28,6 +28,11 @@ class RetrievedChunk(BaseModel):
         snippet = re.sub(r"\s+", " ", self.text or "").strip()
         return snippet[:160]
 
+    @property
+    def citation(self) -> str:
+        """Return a compact citation string."""
+        return f"({self.document_id})[{self.url}]"
+
     def __repr__(self) -> str:
         path = self.path or ""
         snippet = self.text_snippet

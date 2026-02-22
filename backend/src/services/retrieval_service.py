@@ -8,12 +8,11 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import bindparam, func, select
 
-from src.core.rag_config import EMBEDDING_SETTINGS, RETRIEVAL_SETTINGS
+from src.core.rag_config import RETRIEVAL_SETTINGS
 from src.models.node import DocumentNode, TextNode
 from src.schemas.retrieval import RetrievedChunk
 from src.services.embedding_service import (
-    MLXQwen3EmbeddingService,
-    get_embedding_service,
+    EmbeddingService,
 )
 from src.services.reranking_service import RerankingService
 
@@ -33,10 +32,11 @@ class RetrievalService:
         self,
         session: AsyncSession,
         reranker: RerankingService | None = None,
+        embedder: EmbeddingService | None = None,
     ) -> None:
         """Initialize the retrieval service."""
         self.session = session
-        self._embedder: MLXQwen3EmbeddingService | None = None
+        self._embedder = embedder or EmbeddingService()
         self._reranker = reranker or RerankingService()
 
     async def retrieve(
@@ -50,9 +50,11 @@ class RetrievalService:
         if not normalized_query:
             return []
 
-        embedding = await self._embed_query_async(normalized_query)
+        embedding_result = await self._embedder.embed_query(normalized_query)
+        query_embedding = list(embedding_result.embeddings[0])
+
         text_chunks = await self._text_candidates(normalized_query)
-        vector_chunks = await self._vector_candidates(embedding)
+        vector_chunks = await self._vector_candidates(query_embedding)
 
         merged = self._rrf_merge(text_chunks, vector_chunks)
         reranked = await asyncio.to_thread(
@@ -75,22 +77,6 @@ class RetrievalService:
     @staticmethod
     def _normalize_query(query: str) -> str:
         return _QUERY_WHITESPACE_RE.sub(" ", query).strip()
-
-    def _get_embedder(self) -> MLXQwen3EmbeddingService:
-        if self._embedder is None:
-            self._embedder = get_embedding_service()
-        return self._embedder
-
-    def _embed_query(self, query: str) -> list[float]:
-        embedder = self._get_embedder()
-        embedding = embedder.encode_query(
-            [query],
-            batch_size=EMBEDDING_SETTINGS.query_batch_size,
-        )
-        return embedding[0].tolist()
-
-    async def _embed_query_async(self, query: str) -> list[float]:
-        return await asyncio.to_thread(self._embed_query, query)
 
     async def _text_candidates(
         self,
@@ -116,18 +102,16 @@ class RetrievalService:
         )
         rows = await self.session.execute(stmt.params(query=query))
 
-        chunks: list[RetrievedChunk] = []
-        for chunk_id, document_id, url, text, metadata in rows.tuples():
-            chunks.append(
-                RetrievedChunk(
-                    chunk_id=chunk_id,
-                    document_id=document_id,
-                    url=url,
-                    path=self._metadata_path(metadata),
-                    text=text,
-                ),
+        return [
+            RetrievedChunk(
+                chunk_id=chunk_id,
+                document_id=document_id,
+                url=url,
+                path=node_metadata.get("path") if node_metadata else None,
+                text=text,
             )
-        return chunks
+            for chunk_id, document_id, url, text, node_metadata in rows.tuples()
+        ]
 
     async def _vector_candidates(
         self,
@@ -150,24 +134,16 @@ class RetrievalService:
         )
         rows = await self.session.execute(stmt.params(embedding=embedding))
 
-        chunks: list[RetrievedChunk] = []
-        for chunk_id, document_id, url, text, metadata in rows.tuples():
-            chunks.append(
-                RetrievedChunk(
-                    chunk_id=chunk_id,
-                    document_id=document_id,
-                    url=url,
-                    path=self._metadata_path(metadata),
-                    text=text,
-                ),
+        return [
+            RetrievedChunk(
+                chunk_id=chunk_id,
+                document_id=document_id,
+                url=url,
+                path=node_metadata.get("path") if node_metadata else None,
+                text=text,
             )
-        return chunks
-
-    @staticmethod
-    def _metadata_path(node_metadata: dict[str, object] | None) -> str | None:
-        if not node_metadata:
-            return None
-        return str(node_metadata.get("path") or "") or None
+            for chunk_id, document_id, url, text, node_metadata in rows.tuples()
+        ]
 
     def _rrf_merge(
         self,

@@ -7,12 +7,12 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from string import Template
 
-from loguru import logger
+import logfire
 from pydantic_ai import Agent, RunContext
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.agentic_system.utils import get_chat_model
+from src.core.model_provider.litellm import get_litellm_chat_model
 from src.core.rag_config import AGENT_SETTINGS, RETRIEVAL_SETTINGS
 from src.schemas.retrieval import RetrievedChunk
 from src.services.prompt_service import PromptService
@@ -71,7 +71,7 @@ def register_main_agent(
                 timeout=RETRIEVAL_SETTINGS.tool_timeout_seconds,
             )
         except TimeoutError:
-            logger.warning(
+            logfire.warning(
                 "retrieve_chunks timed out after {}s for query: {}",
                 RETRIEVAL_SETTINGS.tool_timeout_seconds,
                 query,
@@ -80,7 +80,7 @@ def register_main_agent(
                 await status_callback("retrieval_timeout")
             return []
         except Exception:  # noqa: BLE001
-            logger.exception("retrieve_chunks failed")
+            logfire.exception("retrieve_chunks failed")
             if status_callback is not None:
                 await status_callback("retrieval_failed")
             return []
@@ -96,7 +96,7 @@ def get_main_agent() -> Agent[MainAgentDependencies, str]:
     """Return the main agent."""
     agent = Agent[MainAgentDependencies, str](
         name=AGENT_SETTINGS.name,
-        model=get_chat_model(AGENT_SETTINGS.model_name),
+        model=get_litellm_chat_model(AGENT_SETTINGS.model_name),
         deps_type=MainAgentDependencies,
     )
     return register_main_agent(agent)

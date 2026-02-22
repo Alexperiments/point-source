@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic_ai import EmbeddingResult
 
 from src.core.rag_config import RETRIEVAL_SETTINGS
 from src.schemas.retrieval import RetrievedChunk
@@ -17,7 +18,12 @@ class _DummySession:
         raise AssertionError(msg)
 
 
-def _chunk(name: str, *, url: str = "https://arxiv.org/abs/paper-1", path: str | None = None) -> RetrievedChunk:
+def _chunk(
+    name: str,
+    *,
+    url: str = "https://arxiv.org/abs/paper-1",
+    path: str | None = None,
+) -> RetrievedChunk:
     return RetrievedChunk(
         chunk_id=uuid.uuid5(uuid.NAMESPACE_DNS, f"chunk-{name}"),
         document_id=f"doc-{name}",
@@ -41,23 +47,44 @@ class _RecordingReranker:
         return candidates
 
 
+@dataclass
+class _RecordingEmbedder:
+    embedding: list[float]
+
+    def __post_init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def embed_query(self, query: str) -> EmbeddingResult:
+        self.calls.append(query)
+        return EmbeddingResult(
+            embeddings=[self.embedding],
+            inputs=[query],
+            input_type="query",
+            model_name="test-embedding-model",
+            provider_name="test-provider",
+        )
+
+
 @pytest.mark.asyncio
 async def test_retrieve_returns_empty_for_blank_queries(monkeypatch) -> None:
     reranker = _RecordingReranker()
-    service = RetrievalService(session=_DummySession(), reranker=reranker)
+    embedder = _RecordingEmbedder([0.1, 0.2])
+    service = RetrievalService(
+        session=_DummySession(),
+        reranker=reranker,
+        embedder=embedder,
+    )
 
-    embed_mock = AsyncMock(return_value=[0.1, 0.2])
     text_mock = AsyncMock(return_value=[])
     vector_mock = AsyncMock(return_value=[])
 
-    monkeypatch.setattr(service, "_embed_query_async", embed_mock)
     monkeypatch.setattr(service, "_text_candidates", text_mock)
     monkeypatch.setattr(service, "_vector_candidates", vector_mock)
 
     chunks = await service.retrieve("  \n\t ")
 
     assert chunks == []
-    embed_mock.assert_not_awaited()
+    assert embedder.calls == []
     text_mock.assert_not_awaited()
     vector_mock.assert_not_awaited()
     assert reranker.calls == []
@@ -66,19 +93,22 @@ async def test_retrieve_returns_empty_for_blank_queries(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_retrieve_normalizes_query_and_calls_candidates(monkeypatch) -> None:
     reranker = _RecordingReranker()
-    service = RetrievalService(session=_DummySession(), reranker=reranker)
+    embedder = _RecordingEmbedder([0.3, 0.7])
+    service = RetrievalService(
+        session=_DummySession(),
+        reranker=reranker,
+        embedder=embedder,
+    )
 
-    embed_mock = AsyncMock(return_value=[0.3, 0.7])
     text_mock = AsyncMock(return_value=[])
     vector_mock = AsyncMock(return_value=[])
 
-    monkeypatch.setattr(service, "_embed_query_async", embed_mock)
     monkeypatch.setattr(service, "_text_candidates", text_mock)
     monkeypatch.setattr(service, "_vector_candidates", vector_mock)
 
     await service.retrieve("  graph\n   theory   ")
 
-    embed_mock.assert_awaited_once_with("graph theory")
+    assert embedder.calls == ["graph theory"]
     text_mock.assert_awaited_once_with("graph theory")
     vector_mock.assert_awaited_once_with([0.3, 0.7])
     assert reranker.calls[0][0] == "graph theory"
@@ -89,7 +119,11 @@ def test_rrf_merge_dedupes_and_ranks(monkeypatch) -> None:
     monkeypatch.setattr(RETRIEVAL_SETTINGS, "text_weight", 0.3)
     monkeypatch.setattr(RETRIEVAL_SETTINGS, "semantic_weight", 0.7)
 
-    service = RetrievalService(session=_DummySession(), reranker=_RecordingReranker())
+    service = RetrievalService(
+        session=_DummySession(),
+        reranker=_RecordingReranker(),
+        embedder=_RecordingEmbedder([1.0]),
+    )
 
     chunk_a = _chunk("a", url="https://arxiv.org/abs/doc-a", path="/a")
     chunk_b = _chunk("b", url="https://arxiv.org/abs/doc-b", path="/b")
@@ -137,13 +171,15 @@ async def test_retrieve_applies_reranker_before_top_n(monkeypatch) -> None:
             return list(reversed(candidates))
 
     reranker = _ReverseReranker()
-    service = RetrievalService(session=_DummySession(), reranker=reranker)
+    service = RetrievalService(
+        session=_DummySession(),
+        reranker=reranker,
+        embedder=_RecordingEmbedder([1.0]),
+    )
 
-    embed_mock = AsyncMock(return_value=[1.0])
     text_mock = AsyncMock(return_value=[_chunk("a"), _chunk("b")])
     vector_mock = AsyncMock(return_value=[])
 
-    monkeypatch.setattr(service, "_embed_query_async", embed_mock)
     monkeypatch.setattr(service, "_text_candidates", text_mock)
     monkeypatch.setattr(service, "_vector_candidates", vector_mock)
 
@@ -160,14 +196,13 @@ async def test_retrieve_expands_neighbors_only_when_requested(monkeypatch) -> No
     service = RetrievalService(
         session=_DummySession(),
         reranker=_RecordingReranker(),
+        embedder=_RecordingEmbedder([1.0]),
     )
 
-    embed_mock = AsyncMock(return_value=[1.0])
     text_mock = AsyncMock(side_effect=[[_chunk("target")], [_chunk("target")]])
     vector_mock = AsyncMock(return_value=[])
     expand_mock = AsyncMock()
 
-    monkeypatch.setattr(service, "_embed_query_async", embed_mock)
     monkeypatch.setattr(service, "_text_candidates", text_mock)
     monkeypatch.setattr(service, "_vector_candidates", vector_mock)
     monkeypatch.setattr(service, "_expand_with_neighbors", expand_mock)

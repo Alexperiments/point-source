@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import StaticPool
 
 from src.core.database.base import Base, get_async_session
 from src.main import app
@@ -25,6 +26,9 @@ async def test_engine() -> AsyncGenerator:
         TEST_DATABASE_URL,
         echo=False,
         future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        execution_options={"schema_translate_map": {"processed": None}},
     )
     yield engine
     await engine.dispose()

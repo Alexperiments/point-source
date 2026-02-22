@@ -92,14 +92,14 @@ class EmbeddingSettings(BaseSettings):
     )
 
     model_name: str = Field(
-        default="mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ",
+        default="jina_ai/jina-embeddings-v3",
     )
-    max_tokens: int = Field(default=256)
-    query_batch_size: int = Field(default=8)
-    document_batch_size: int = Field(default=8)
+    max_tokens: int = Field(default=300)
+    batch_size: int = Field(default=8)
     query_instruction: str = Field(
         default="Given a web search query, retrieve relevant passages that answer the query.",
     )
+    embedding_size: int = Field(default=1024)
 
 
 class RetrievalSettings(BaseSettings):
@@ -138,7 +138,7 @@ class RerankerSettings(BaseSettings):
     )
 
     enabled: bool = Field(default=True)
-    model_name: str = Field(default="jina-reranker")
+    model_name: str = Field(default="jina_ai/jina-reranker-v3")
     timeout_seconds: int = Field(default=30, ge=1)
     top_k: int = Field(default=5)
 
