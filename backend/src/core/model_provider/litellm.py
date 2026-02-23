@@ -1,6 +1,7 @@
 """Agentic system utilities."""
 
 from pydantic_ai import Embedder
+from pydantic_ai.embeddings.openai import OpenAIEmbeddingModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.litellm import LiteLLMProvider
 
@@ -27,11 +28,15 @@ def get_litellm_chat_model(
 
 def get_litellm_embedding_model(settings: EmbeddingSettings) -> Embedder:
     """Get a LiteLLM embedding model instance."""
-    return Embedder(
+    embedding_model = OpenAIEmbeddingModel(
         model_name=settings.model_name,
-        settings={"dimensions": settings.embedding_size},
         provider=LiteLLMProvider(
             api_base=app_settings.litellm_base_url.unicode_string(),
             api_key=app_settings.litellm_api_key.get_secret_value(),
         ),
+        settings={"dimensions": settings.embedding_size},
+    )
+
+    return Embedder(
+        model=embedding_model,
     )

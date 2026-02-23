@@ -35,7 +35,7 @@ class MLXQwen3EmbeddingModel(EmbeddingModel):
         self.batch_size = settings.batch_size
 
     @property
-    def model_name(self) -> str:
+    def model(self) -> str:
         """The embedding model name."""
         return self._model_name
 
