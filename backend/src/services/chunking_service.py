@@ -533,9 +533,7 @@ class MarkdownChunker:
     ) -> list[TextNode]:
         """Chunk documents and return newly created TextNode objects."""
         with logfire.span(f"chunking {len(documents)} documents."):
-            nodes = self._chunk_internal(documents, metadata=metadata)
-            logfire.info("documents_chunking completed")
-            return nodes
+            return self._chunk_internal(documents, metadata=metadata)
 
     def _chunk_internal(
         self,
