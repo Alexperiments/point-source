@@ -46,6 +46,27 @@ EMBEDDING_MODEL_SPECS: tuple[EmbeddingModelSpec, ...] = (
         provider="sentence_transformers",
     ),
     EmbeddingModelSpec(
+        key="jina_embeddings_v3",
+        model_name="jina_ai/jina-embeddings-v3",
+        dimension=1024,
+        provider="openai",
+        enabled=True,
+    ),
+    EmbeddingModelSpec(
+        key="jina_embeddings_v5_text_small",
+        model_name="jina-embeddings-v5-text-small",
+        dimension=1024,
+        provider="openai",
+        enabled=True,
+    ),
+    EmbeddingModelSpec(
+        key="jina_embeddings_v4",
+        model_name="jina_ai/jina-embeddings-v4",
+        dimension=2048,
+        provider="openai",
+        enabled=True,
+    ),
+    EmbeddingModelSpec(
         key="text_embedding_3_small",
         model_name="text-embedding-3-small",
         dimension=1536,

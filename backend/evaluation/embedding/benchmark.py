@@ -45,9 +45,9 @@ from evaluation.embedding.models import (
     EmbeddingEvalPairMetric,
     EmbeddingEvalQuery,
 )
+from evaluation.embedding.preprocess import InputType, preprocess_texts
 from src.core.config import settings
 from src.core.database.base import async_session
-from src.services.embedding_preprocess import InputType, preprocess_texts
 
 
 app = typer.Typer(no_args_is_help=True)
@@ -152,11 +152,55 @@ class OpenAIEmbeddingClient:
         self.api_key = api_key
         self.timeout_s = timeout_s
 
-    def _embed_batch(self, batch: list[str]) -> list[list[float]]:
-        payload = {
+    def _jina_task(self, input_type: InputType | None) -> str | None:
+        lowered = self.model_name.lower()
+        if (
+            "jina-embeddings-v5-text-small" in lowered
+            or "jina-embeddings-v4" in lowered
+        ):
+            if input_type == "query":
+                return "retrieval.query"
+            if input_type == "document":
+                return "retrieval.passage"
+        return None
+
+    @staticmethod
+    def _coerce_single_embedding_vector(embedding: object) -> list[float]:
+        if not isinstance(embedding, list):
+            raise TypeError("Invalid embeddings response: embedding not list")
+        if not embedding:
+            raise TypeError("Invalid embeddings response: empty embedding")
+
+        first = embedding[0]
+        if isinstance(first, list):
+            # Handle multi-vector outputs by mean-pooling to a single dense vector.
+            mat = np.asarray(embedding, dtype=np.float32)
+            if mat.ndim != 2:
+                raise TypeError(
+                    "Invalid embeddings response: multi-vector embedding malformed",
+                )
+            return mat.mean(axis=0, dtype=np.float32).tolist()
+
+        try:
+            return [float(x) for x in embedding]
+        except (TypeError, ValueError) as exc:
+            raise TypeError(
+                "Invalid embeddings response: embedding must be numeric",
+            ) from exc
+
+    def _embed_batch(
+        self,
+        batch: list[str],
+        *,
+        input_type: InputType | None,
+    ) -> list[list[float]]:
+        payload: dict[str, object] = {
             "model": self.model_name,
             "input": batch,
         }
+        jina_task = self._jina_task(input_type)
+        if jina_task is not None:
+            payload["task"] = jina_task
         # Endpoint scheme validated in __init__; allow http/https only.
         req = url_request.Request(  # noqa: S310
             self.endpoint,
@@ -184,9 +228,7 @@ class OpenAIEmbeddingClient:
         embeddings: list[list[float]] = []
         for item in data_sorted:
             embedding = item.get("embedding")
-            if not isinstance(embedding, list):
-                raise TypeError("Invalid embeddings response: embedding not list")
-            embeddings.append(embedding)
+            embeddings.append(self._coerce_single_embedding_vector(embedding))
         return embeddings
 
     def encode(
@@ -207,7 +249,7 @@ class OpenAIEmbeddingClient:
         embeddings: list[list[float]] = []
         for start in range(0, len(text_list), batch_size):
             batch = text_list[start : start + batch_size]
-            embeddings.extend(self._embed_batch(batch))
+            embeddings.extend(self._embed_batch(batch, input_type=input_type))
 
         arr = np.asarray(embeddings, dtype=np.float32)
         if normalize_embeddings:
