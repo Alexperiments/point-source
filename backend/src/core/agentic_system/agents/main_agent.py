@@ -53,7 +53,6 @@ def register_main_agent(
     async def retrieve_chunks(
         ctx: RunContext[MainAgentDependencies],
         query: str,
-        use_prev_next: bool | None = None,
     ) -> list[RetrievedChunk]:
         """Retrieve relevant document chunks invoking the relative service."""
         status_callback = ctx.deps.status_callback
@@ -64,10 +63,7 @@ def register_main_agent(
 
         try:
             return await asyncio.wait_for(
-                service.retrieve(
-                    query=query,
-                    use_prev_next=use_prev_next,
-                ),
+                service.retrieve(query=query),
                 timeout=RETRIEVAL_SETTINGS.tool_timeout_seconds,
             )
         except TimeoutError:
@@ -95,8 +91,7 @@ def register_main_agent(
 def get_main_agent() -> Agent[MainAgentDependencies, str]:
     """Return the main agent."""
     agent = Agent[MainAgentDependencies, str](
-        name=AGENT_SETTINGS.name,
-        model=get_litellm_chat_model(AGENT_SETTINGS.model_name),
+        model=get_litellm_chat_model(AGENT_SETTINGS),
         deps_type=MainAgentDependencies,
     )
     return register_main_agent(agent)

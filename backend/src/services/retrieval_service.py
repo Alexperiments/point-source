@@ -6,23 +6,47 @@ import asyncio
 import re
 from typing import TYPE_CHECKING
 
-from sqlalchemy import bindparam, func, select
+import logfire
+from sqlalchemy import text as sa_text
 
-from src.core.rag_config import RETRIEVAL_SETTINGS
-from src.models.node import DocumentNode, TextNode
+from src.core.rag_config import RERANKER_SETTINGS, RETRIEVAL_SETTINGS
+from src.schemas.reranking import Passage
 from src.schemas.retrieval import RetrievedChunk
 from src.services.embedding_service import (
     EmbeddingService,
 )
-from src.services.reranking_service import RerankingService
+from src.services.reranking_service import RerankingService, RerankingServiceError
 
 
 if TYPE_CHECKING:
-    from uuid import UUID
-
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from src.schemas.reranking import RerankingModelResult
+
 _QUERY_WHITESPACE_RE = re.compile(r"\s+")
+_HYBRID_RETRIEVE_SQL = sa_text(
+    """
+    SELECT
+        chunk_id,
+        document_id,
+        url,
+        chunk_text,
+        node_metadata,
+        text_rank,
+        vector_rank,
+        rrf_score
+    FROM processed.hybrid_retrieve(
+        :query,
+        CAST(:embedding AS vector(1024)),
+        :text_k,
+        :vec_k,
+        :fused_k,
+        :rrf_k,
+        :text_weight,
+        :vector_weight
+    )
+    """,
+)
 
 
 class RetrievalService:
@@ -42,8 +66,6 @@ class RetrievalService:
     async def retrieve(
         self,
         query: str,
-        *,
-        use_prev_next: bool | None = None,
     ) -> list[RetrievedChunk]:
         """Retrieve relevant chunks for a query."""
         normalized_query = self._normalize_query(query)
@@ -53,86 +75,46 @@ class RetrievalService:
         embedding_result = await self._embedder.embed_query(normalized_query)
         query_embedding = list(embedding_result.embeddings[0])
 
-        text_chunks = await self._text_candidates(normalized_query)
-        vector_chunks = await self._vector_candidates(query_embedding)
+        merged = await self._hybrid_candidates(normalized_query, query_embedding)
+        if merged and RERANKER_SETTINGS.enabled:
+            try:
+                reranked = await asyncio.to_thread(
+                    self._reranker.rerank,
+                    normalized_query,
+                    [
+                        Passage(id=chunk.chunk_id, passage=chunk.text)
+                        for chunk in merged
+                    ],
+                )
+                merged = self._apply_reranking(merged, reranked)
+            except RerankingServiceError as e:
+                logfire.exception(f"Reranking failed: {e!s}")
 
-        merged = self._rrf_merge(text_chunks, vector_chunks)
-        reranked = await asyncio.to_thread(
-            self._reranker.rerank,
-            normalized_query,
-            merged,
-        )
-        results = reranked[: RETRIEVAL_SETTINGS.top_n]
-
-        include_neighbors = (
-            use_prev_next
-            if use_prev_next is not None
-            else RETRIEVAL_SETTINGS.use_prev_next
-        )
-        if include_neighbors and results:
-            await self._expand_with_neighbors(results)
-
-        return results
+        return merged[: RETRIEVAL_SETTINGS.top_n]
 
     @staticmethod
     def _normalize_query(query: str) -> str:
         return _QUERY_WHITESPACE_RE.sub(" ", query).strip()
 
-    async def _text_candidates(
+    async def _hybrid_candidates(
         self,
         query: str,
-    ) -> list[RetrievedChunk]:
-        ts_query = func.websearch_to_tsquery("simple", bindparam("query"))
-        ts_vector = func.to_tsvector("simple", TextNode.text)
-        ts_rank = func.ts_rank_cd(ts_vector, ts_query)
-
-        stmt = (
-            select(
-                TextNode.id,
-                TextNode.document_id,
-                DocumentNode.url,
-                TextNode.text,
-                TextNode.node_metadata,
-            )
-            .join(DocumentNode, TextNode.document_id == DocumentNode.id)
-            .where(TextNode.text != "")
-            .where(ts_vector.op("@@")(ts_query))
-            .order_by(ts_rank.desc())
-            .limit(RETRIEVAL_SETTINGS.text_top_k)
-        )
-        rows = await self.session.execute(stmt.params(query=query))
-
-        return [
-            RetrievedChunk(
-                chunk_id=chunk_id,
-                document_id=document_id,
-                url=url,
-                path=node_metadata.get("path") if node_metadata else None,
-                text=text,
-            )
-            for chunk_id, document_id, url, text, node_metadata in rows.tuples()
-        ]
-
-    async def _vector_candidates(
-        self,
         embedding: list[float],
     ) -> list[RetrievedChunk]:
-        distance = TextNode.embedding.op("<=>")(bindparam("embedding"))
-
-        stmt = (
-            select(
-                TextNode.id,
-                TextNode.document_id,
-                DocumentNode.url,
-                TextNode.text,
-                TextNode.node_metadata,
-            )
-            .join(DocumentNode, TextNode.document_id == DocumentNode.id)
-            .where(TextNode.text != "", TextNode.embedding.is_not(None))
-            .order_by(distance)
-            .limit(RETRIEVAL_SETTINGS.vector_top_k)
+        fused_k = RETRIEVAL_SETTINGS.text_top_k + RETRIEVAL_SETTINGS.vector_top_k
+        rows = await self.session.execute(
+            _HYBRID_RETRIEVE_SQL,
+            {
+                "query": query,
+                "embedding": self._vector_literal(embedding),
+                "text_k": RETRIEVAL_SETTINGS.text_top_k,
+                "vec_k": RETRIEVAL_SETTINGS.vector_top_k,
+                "fused_k": fused_k,
+                "rrf_k": RETRIEVAL_SETTINGS.rrf_k,
+                "text_weight": RETRIEVAL_SETTINGS.text_weight,
+                "vector_weight": RETRIEVAL_SETTINGS.semantic_weight,
+            },
         )
-        rows = await self.session.execute(stmt.params(embedding=embedding))
 
         return [
             RetrievedChunk(
@@ -140,136 +122,50 @@ class RetrievalService:
                 document_id=document_id,
                 url=url,
                 path=node_metadata.get("path") if node_metadata else None,
-                text=text,
+                text=chunk_text,
+                text_rank=text_rank,
+                vector_rank=vector_rank,
+                rrf_score=rrf_score,
             )
-            for chunk_id, document_id, url, text, node_metadata in rows.tuples()
+            for (
+                chunk_id,
+                document_id,
+                url,
+                chunk_text,
+                node_metadata,
+                text_rank,
+                vector_rank,
+                rrf_score,
+            ) in rows.tuples()
         ]
 
-    def _rrf_merge(
-        self,
-        text_chunks: list[RetrievedChunk],
-        vector_chunks: list[RetrievedChunk],
+    @staticmethod
+    def _vector_literal(embedding: list[float]) -> str:
+        return f"[{','.join(format(value, '.12g') for value in embedding)}]"
+
+    @staticmethod
+    def _apply_reranking(
+        candidates: list[RetrievedChunk],
+        reranked: list[RerankingModelResult],
     ) -> list[RetrievedChunk]:
-        candidates: dict[UUID, RetrievedChunk] = {}
+        if not reranked:
+            return candidates
 
-        for rank, chunk in enumerate(text_chunks, start=1):
-            candidate = candidates.get(chunk.chunk_id)
+        ordered_candidates: list[RetrievedChunk] = []
+        candidates_by_id = {
+            candidate.chunk_id: candidate.model_copy(deep=True)
+            for candidate in candidates
+        }
+
+        for result in reranked:
+            chunk_id = result.passage.id
+            candidate = candidates_by_id.pop(chunk_id, None)
             if candidate is None:
-                candidate = chunk.model_copy(deep=True)
-                candidates[chunk.chunk_id] = candidate
-            candidate.text_rank = rank
-
-        for rank, chunk in enumerate(vector_chunks, start=1):
-            candidate = candidates.get(chunk.chunk_id)
-            if candidate is None:
-                candidate = chunk.model_copy(deep=True)
-                candidates[chunk.chunk_id] = candidate
-            candidate.vector_rank = rank
-
-        for candidate in candidates.values():
-            candidate.rrf_score = self._rrf_score(
-                text_rank=candidate.text_rank,
-                vector_rank=candidate.vector_rank,
-            )
-
-        return sorted(
-            candidates.values(),
-            key=lambda item: item.rrf_score,
-            reverse=True,
-        )
-
-    @staticmethod
-    def _rrf_score(
-        *,
-        text_rank: int | None,
-        vector_rank: int | None,
-    ) -> float:
-        score = 0.0
-        if text_rank is not None:
-            score += RETRIEVAL_SETTINGS.text_weight / (
-                RETRIEVAL_SETTINGS.rrf_k + text_rank
-            )
-        if vector_rank is not None:
-            score += RETRIEVAL_SETTINGS.semantic_weight / (
-                RETRIEVAL_SETTINGS.rrf_k + vector_rank
-            )
-        return score
-
-    async def _expand_with_neighbors(self, chunks: list[RetrievedChunk]) -> None:
-        chunk_ids = [chunk.chunk_id for chunk in chunks]
-        if not chunk_ids:
-            return
-
-        base = await self._load_base_chunks(chunk_ids)
-        prev_texts = await self._load_prev_texts(base)
-        next_texts = await self._load_next_texts(chunk_ids)
-
-        for chunk in chunks:
-            base_row = base.get(chunk.chunk_id)
-            if base_row is None:
                 continue
-            chunk.text = self._merge_neighbor_texts(
-                current_text=base_row[0] or chunk.text,
-                prev_text=prev_texts.get(base_row[1]),
-                next_text=next_texts.get(chunk.chunk_id),
-            )
 
-    async def _load_base_chunks(
-        self,
-        chunk_ids: list[UUID],
-    ) -> dict[UUID, tuple[str | None, UUID | None]]:
-        stmt = select(
-            TextNode.id,
-            TextNode.text,
-            TextNode.prev_id,
-        ).where(TextNode.id.in_(chunk_ids))
-        rows = await self.session.execute(stmt)
-        return {chunk_id: (text, prev_id) for chunk_id, text, prev_id in rows.tuples()}
+            candidate.relevance_score = result.relevance_score
+            ordered_candidates.append(candidate)
 
-    async def _load_prev_texts(
-        self,
-        base: dict[UUID, tuple[str | None, UUID | None]],
-    ) -> dict[UUID, str]:
-        prev_ids = [prev_id for _, prev_id in base.values() if prev_id is not None]
-        if not prev_ids:
-            return {}
+        ordered_candidates.extend(candidates_by_id.values())
 
-        stmt = select(
-            TextNode.id,
-            TextNode.text,
-        ).where(TextNode.id.in_(prev_ids))
-        rows = await self.session.execute(stmt)
-        return {chunk_id: text for chunk_id, text in rows.tuples() if text is not None}
-
-    async def _load_next_texts(self, chunk_ids: list[UUID]) -> dict[UUID, str]:
-        stmt = select(
-            TextNode.prev_id,
-            TextNode.text,
-        ).where(TextNode.prev_id.in_(chunk_ids))
-        rows = await self.session.execute(stmt)
-
-        next_texts: dict[UUID, str] = {}
-        for prev_id, text in rows.tuples():
-            if prev_id is None or text is None:
-                continue
-            next_texts.setdefault(prev_id, text)
-        return next_texts
-
-    @staticmethod
-    def _merge_neighbor_texts(
-        current_text: str,
-        *,
-        prev_text: str | None,
-        next_text: str | None,
-    ) -> str:
-        parts: list[str] = []
-        if prev_text:
-            parts.append(prev_text)
-        parts.append(current_text)
-        if next_text:
-            parts.append(next_text)
-
-        merged = "\n\n".join(parts)
-        if len(merged) > RETRIEVAL_SETTINGS.max_merged_chars:
-            return merged[: RETRIEVAL_SETTINGS.max_merged_chars]
-        return merged
+        return ordered_candidates

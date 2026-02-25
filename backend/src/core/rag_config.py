@@ -92,7 +92,7 @@ class EmbeddingSettings(BaseSettings):
     )
 
     model_name: str = Field(
-        default="jina_ai/jina-embeddings-v3",
+        default="jina-embeddings-v5-text-small",
     )
     max_tokens: int = Field(default=300)
     batch_size: int = Field(default=8)
@@ -116,11 +116,9 @@ class RetrievalSettings(BaseSettings):
     top_n: int = Field(default=64)
     text_top_k: int = Field(default=50)
     vector_top_k: int = Field(default=50)
-    rrf_k: int = Field(default=60)
+    rrf_k: int = Field(default=64)
     semantic_weight: float = Field(default=0.7, ge=0.0, le=1.0)
     text_weight: float = Field(default=0.3, ge=0.0, le=1.0)
-    use_prev_next: bool = Field(default=False)
-    max_merged_chars: int = Field(default=4000)
     cache_prefix: str = Field(default="retrieval_cache:")
     cache_ttl_seconds: int = Field(default=900)
     tool_timeout_seconds: int = Field(default=45, ge=5)
@@ -139,8 +137,9 @@ class RerankerSettings(BaseSettings):
 
     enabled: bool = Field(default=True)
     model_name: str = Field(default="jina_ai/jina-reranker-v3")
+    top_k: int = Field(default=5, ge=0)
+    custom_llm_provider: str = Field(default="litellm_proxy")
     timeout_seconds: int = Field(default=30, ge=1)
-    top_k: int = Field(default=5)
 
 
 class AgentSettings(BaseSettings):
@@ -156,10 +155,6 @@ class AgentSettings(BaseSettings):
 
     name: str = Field(default="Main Agent")
     model_name: str = Field(default="gpt-5-nano")
-    custom_llm_provider: str | None = Field(
-        default=None,
-        description="LiteLLM custom provider override for custom model routing.",
-    )
     temperature: float = Field(default=0.3, ge=0.0)
     max_tokens: int = Field(default=8192, ge=1)
     instruction_slug: str = Field(default="main_agent_instructions")
