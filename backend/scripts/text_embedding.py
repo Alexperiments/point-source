@@ -14,8 +14,8 @@ logfire.configure()
 logfire.instrument_sqlalchemy()
 logfire.instrument_pydantic_ai()
 
-SLEEP_SECONDS_BETWEEN_BATCHES = 60
-BATCH_SIZE = 512
+SLEEP_SECONDS_BETWEEN_BATCHES = 0
+BATCH_SIZE = 2048
 
 
 @logfire.instrument("Embedding chunks job")
