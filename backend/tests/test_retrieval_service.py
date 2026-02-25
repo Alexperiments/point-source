@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic_ai import EmbeddingResult
 
-from src.core.rag_config import RETRIEVAL_SETTINGS
+from src.core.rag_config import RERANKER_SETTINGS, RETRIEVAL_SETTINGS
+from src.schemas.reranking import Passage, RerankingModelResult
 from src.schemas.retrieval import RetrievedChunk
 from src.services.retrieval_service import RetrievalService
 
@@ -36,15 +37,22 @@ def _chunk(
 @dataclass
 class _RecordingReranker:
     def __post_init__(self) -> None:
-        self.calls: list[tuple[str, list[RetrievedChunk]]] = []
+        self.calls: list[tuple[str, list[Passage]]] = []
 
     def rerank(
         self,
         query: str,
-        candidates: list[RetrievedChunk],
-    ) -> list[RetrievedChunk]:
-        self.calls.append((query, candidates))
-        return candidates
+        passages: list[Passage],
+    ) -> list[RerankingModelResult]:
+        self.calls.append((query, passages))
+        return [
+            RerankingModelResult(
+                query=query,
+                passage=passage,
+                relevance_score=float(len(passages) - index),
+            )
+            for index, passage in enumerate(passages)
+        ]
 
 
 @dataclass
@@ -75,23 +83,22 @@ async def test_retrieve_returns_empty_for_blank_queries(monkeypatch) -> None:
         embedder=embedder,
     )
 
-    text_mock = AsyncMock(return_value=[])
-    vector_mock = AsyncMock(return_value=[])
+    hybrid_mock = AsyncMock(return_value=[])
 
-    monkeypatch.setattr(service, "_text_candidates", text_mock)
-    monkeypatch.setattr(service, "_vector_candidates", vector_mock)
+    monkeypatch.setattr(service, "_hybrid_candidates", hybrid_mock)
 
     chunks = await service.retrieve("  \n\t ")
 
     assert chunks == []
     assert embedder.calls == []
-    text_mock.assert_not_awaited()
-    vector_mock.assert_not_awaited()
+    hybrid_mock.assert_not_awaited()
     assert reranker.calls == []
 
 
 @pytest.mark.asyncio
 async def test_retrieve_normalizes_query_and_calls_candidates(monkeypatch) -> None:
+    monkeypatch.setattr(RERANKER_SETTINGS, "enabled", True)
+
     reranker = _RecordingReranker()
     embedder = _RecordingEmbedder([0.3, 0.7])
     service = RetrievalService(
@@ -100,75 +107,41 @@ async def test_retrieve_normalizes_query_and_calls_candidates(monkeypatch) -> No
         embedder=embedder,
     )
 
-    text_mock = AsyncMock(return_value=[])
-    vector_mock = AsyncMock(return_value=[])
+    hybrid_mock = AsyncMock(return_value=[_chunk("a")])
 
-    monkeypatch.setattr(service, "_text_candidates", text_mock)
-    monkeypatch.setattr(service, "_vector_candidates", vector_mock)
+    monkeypatch.setattr(service, "_hybrid_candidates", hybrid_mock)
 
     await service.retrieve("  graph\n   theory   ")
 
     assert embedder.calls == ["graph theory"]
-    text_mock.assert_awaited_once_with("graph theory")
-    vector_mock.assert_awaited_once_with([0.3, 0.7])
+    hybrid_mock.assert_awaited_once_with("graph theory", [0.3, 0.7])
     assert reranker.calls[0][0] == "graph theory"
-
-
-def test_rrf_merge_dedupes_and_ranks(monkeypatch) -> None:
-    monkeypatch.setattr(RETRIEVAL_SETTINGS, "rrf_k", 60)
-    monkeypatch.setattr(RETRIEVAL_SETTINGS, "text_weight", 0.3)
-    monkeypatch.setattr(RETRIEVAL_SETTINGS, "semantic_weight", 0.7)
-
-    service = RetrievalService(
-        session=_DummySession(),
-        reranker=_RecordingReranker(),
-        embedder=_RecordingEmbedder([1.0]),
-    )
-
-    chunk_a = _chunk("a", url="https://arxiv.org/abs/doc-a", path="/a")
-    chunk_b = _chunk("b", url="https://arxiv.org/abs/doc-b", path="/b")
-    chunk_c = _chunk("c", url="https://arxiv.org/abs/doc-c", path="/c")
-
-    merged = service._rrf_merge(
-        text_chunks=[chunk_a, chunk_b],
-        vector_chunks=[chunk_b, chunk_c],
-    )
-
-    assert [chunk.chunk_id for chunk in merged] == [
-        chunk_b.chunk_id,
-        chunk_c.chunk_id,
-        chunk_a.chunk_id,
-    ]
-
-    by_id = {chunk.chunk_id: chunk for chunk in merged}
-    assert by_id[chunk_b.chunk_id].text_rank == 2
-    assert by_id[chunk_b.chunk_id].vector_rank == 1
-    assert by_id[chunk_b.chunk_id].path == "/b"
-    assert str(by_id[chunk_b.chunk_id].url) == "https://arxiv.org/abs/doc-b"
-
-    assert by_id[chunk_b.chunk_id].rrf_score == pytest.approx(
-        (0.3 / (60 + 2)) + (0.7 / (60 + 1)),
-    )
-    assert by_id[chunk_c.chunk_id].rrf_score == pytest.approx(0.7 / (60 + 2))
-    assert by_id[chunk_a.chunk_id].rrf_score == pytest.approx(0.3 / (60 + 1))
 
 
 @pytest.mark.asyncio
 async def test_retrieve_applies_reranker_before_top_n(monkeypatch) -> None:
+    monkeypatch.setattr(RERANKER_SETTINGS, "enabled", True)
     monkeypatch.setattr(RETRIEVAL_SETTINGS, "top_n", 1)
 
     @dataclass
     class _ReverseReranker:
         def __post_init__(self) -> None:
-            self.calls: list[list[uuid.UUID]] = []
+            self.calls: list[list[str]] = []
 
         def rerank(
             self,
-            _query: str,
-            candidates: list[RetrievedChunk],
-        ) -> list[RetrievedChunk]:
-            self.calls.append([item.chunk_id for item in candidates])
-            return list(reversed(candidates))
+            query: str,
+            passages: list[Passage],
+        ) -> list[RerankingModelResult]:
+            self.calls.append([item.passage for item in passages])
+            return [
+                RerankingModelResult(
+                    query=query,
+                    passage=passages[index],
+                    relevance_score=float(len(passages) - rank),
+                )
+                for rank, index in enumerate(reversed(range(len(passages))))
+            ]
 
     reranker = _ReverseReranker()
     service = RetrievalService(
@@ -177,49 +150,32 @@ async def test_retrieve_applies_reranker_before_top_n(monkeypatch) -> None:
         embedder=_RecordingEmbedder([1.0]),
     )
 
-    text_mock = AsyncMock(return_value=[_chunk("a"), _chunk("b")])
-    vector_mock = AsyncMock(return_value=[])
-
-    monkeypatch.setattr(service, "_text_candidates", text_mock)
-    monkeypatch.setattr(service, "_vector_candidates", vector_mock)
+    hybrid_mock = AsyncMock(return_value=[_chunk("a"), _chunk("b")])
+    monkeypatch.setattr(service, "_hybrid_candidates", hybrid_mock)
 
     chunks = await service.retrieve("query")
 
-    assert reranker.calls == [[_chunk("a").chunk_id, _chunk("b").chunk_id]]
+    assert reranker.calls == [["text-a", "text-b"]]
     assert [chunk.chunk_id for chunk in chunks] == [_chunk("b").chunk_id]
+    assert chunks[0].relevance_score is not None
 
 
 @pytest.mark.asyncio
-async def test_retrieve_expands_neighbors_only_when_requested(monkeypatch) -> None:
-    monkeypatch.setattr(RETRIEVAL_SETTINGS, "use_prev_next", False)
+async def test_retrieve_skips_reranker_when_disabled(monkeypatch) -> None:
+    monkeypatch.setattr(RERANKER_SETTINGS, "enabled", False)
+    monkeypatch.setattr(RETRIEVAL_SETTINGS, "top_n", 2)
 
+    reranker = _RecordingReranker()
     service = RetrievalService(
         session=_DummySession(),
-        reranker=_RecordingReranker(),
+        reranker=reranker,
         embedder=_RecordingEmbedder([1.0]),
     )
 
-    text_mock = AsyncMock(side_effect=[[_chunk("target")], [_chunk("target")]])
-    vector_mock = AsyncMock(return_value=[])
-    expand_mock = AsyncMock()
+    hybrid_mock = AsyncMock(return_value=[_chunk("a"), _chunk("b")])
+    monkeypatch.setattr(service, "_hybrid_candidates", hybrid_mock)
 
-    monkeypatch.setattr(service, "_text_candidates", text_mock)
-    monkeypatch.setattr(service, "_vector_candidates", vector_mock)
-    monkeypatch.setattr(service, "_expand_with_neighbors", expand_mock)
+    chunks = await service.retrieve("query")
 
-    await service.retrieve("query")
-    await service.retrieve("query", use_prev_next=True)
-
-    assert expand_mock.await_count == 1
-
-
-def test_merge_neighbor_texts_truncates_by_setting(monkeypatch) -> None:
-    monkeypatch.setattr(RETRIEVAL_SETTINGS, "max_merged_chars", 10)
-
-    merged = RetrievalService._merge_neighbor_texts(
-        current_text="text-target",
-        prev_text="abcde",
-        next_text="klmno",
-    )
-
-    assert merged == "abcde\n\ntex"
+    assert reranker.calls == []
+    assert [chunk.chunk_id for chunk in chunks] == [_chunk("a").chunk_id, _chunk("b").chunk_id]
