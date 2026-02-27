@@ -36,9 +36,8 @@ class RetrievedChunk(BaseModel):
     def citation(self) -> str:
         """Return a compact citation string."""
         citation_strings = [
-            self.authors,
-            self.title,
-            self.journal_ref,
+            self.title.replace("\n", " ") if self.title else None,
+            self.journal_ref.replace("\n", " ") if self.journal_ref else None,
         ]
         citation = ". ".join(filter(None, citation_strings))
         return f"[{citation}]({self.doi_url})"

@@ -137,7 +137,7 @@ class RerankerSettings(BaseSettings):
 
     enabled: bool = Field(default=True)
     model_name: str = Field(default="jina_ai/jina-reranker-v3")
-    top_k: int = Field(default=5, ge=0)
+    top_k: int = Field(default=10, ge=0)
     custom_llm_provider: str = Field(default="litellm_proxy")
     timeout_seconds: int = Field(default=30, ge=1)
 
@@ -154,7 +154,7 @@ class AgentSettings(BaseSettings):
     )
 
     name: str = Field(default="Main Agent")
-    model_name: str = Field(default="gpt-5-nano")
+    model_name: str = Field(default="gpt-5-mini")
     temperature: float = Field(default=0.3, ge=0.0)
     max_tokens: int = Field(default=8192, ge=1)
     instruction_slug: str = Field(default="main_agent_instructions")
