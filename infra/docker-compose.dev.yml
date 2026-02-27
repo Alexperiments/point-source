@@ -95,6 +95,13 @@ services:
   postgres:
     container_name: postgres
     image: timescale/timescaledb-ha:pg17
+    shm_size: ${POSTGRES_SHM_SIZE:-12gb}
+    command:
+      [
+        "postgres",
+        "-c",
+        "maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-9GB}",
+      ]
     environment:
       POSTGRES_USER: ${DATABASE_USER:-postgres}
       POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-postgres}
