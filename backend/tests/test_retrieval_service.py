@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic_ai import EmbeddingResult
 
-from src.core.rag_config import RERANKER_SETTINGS, RETRIEVAL_SETTINGS
+from src.core.rag_config import RERANKER_SETTINGS
 from src.schemas.reranking import Passage, RerankingModelResult
 from src.schemas.retrieval import RetrievedChunk
 from src.services.retrieval_service import RetrievalService
@@ -22,13 +22,13 @@ class _DummySession:
 def _chunk(
     name: str,
     *,
-    url: str = "https://arxiv.org/abs/paper-1",
+    doi_url: str = "https://www.doi.org/10.48550/arXiv.paper-1",
     path: str | None = None,
 ) -> RetrievedChunk:
     return RetrievedChunk(
         chunk_id=uuid.uuid5(uuid.NAMESPACE_DNS, f"chunk-{name}"),
         document_id=f"doc-{name}",
-        url=url,
+        doi_url=doi_url,
         path=path,
         text=f"text-{name}",
     )
@@ -121,7 +121,7 @@ async def test_retrieve_normalizes_query_and_calls_candidates(monkeypatch) -> No
 @pytest.mark.asyncio
 async def test_retrieve_applies_reranker_before_top_n(monkeypatch) -> None:
     monkeypatch.setattr(RERANKER_SETTINGS, "enabled", True)
-    monkeypatch.setattr(RETRIEVAL_SETTINGS, "top_n", 1)
+    monkeypatch.setattr(RERANKER_SETTINGS, "top_k", 1)
 
     @dataclass
     class _ReverseReranker:
@@ -163,7 +163,7 @@ async def test_retrieve_applies_reranker_before_top_n(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_retrieve_skips_reranker_when_disabled(monkeypatch) -> None:
     monkeypatch.setattr(RERANKER_SETTINGS, "enabled", False)
-    monkeypatch.setattr(RETRIEVAL_SETTINGS, "top_n", 2)
+    monkeypatch.setattr(RERANKER_SETTINGS, "top_k", 2)
 
     reranker = _RecordingReranker()
     service = RetrievalService(

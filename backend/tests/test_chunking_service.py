@@ -77,7 +77,7 @@ def test_chunk_returns_new_text_nodes(session) -> None:
     chunker = _build_chunker()
     doc = DocumentNode(
         id="astro-ph/1234567",
-        url="https://arxiv.org/abs/astro-ph/1234567",
+        doi_url="https://www.doi.org/10.48550/arXiv.astro-ph/1234567",
         text="# Intro\n\nChunk body.",
     )
     session.add(doc)
@@ -102,7 +102,7 @@ def test_create_part_children_links_document_and_prev_next(session) -> None:
     chunker = _build_chunker()
     doc = DocumentNode(
         id="astro-ph/7654321",
-        url="https://arxiv.org/abs/astro-ph/7654321",
+        doi_url="https://www.doi.org/10.48550/arXiv.astro-ph/7654321",
         text="# Intro\n\nChunk body.",
     )
     parent = TextNode(text="Parent section")

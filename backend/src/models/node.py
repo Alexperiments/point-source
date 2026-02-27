@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from pgvector.sqlalchemy import Vector
+from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy import (
     JSON,
     DateTime,
@@ -50,7 +50,7 @@ class TextNode(NodeBase):
     )
 
     embedding: Mapped[list[float] | None] = mapped_column(
-        Vector(1024),
+        HALFVEC(1024),
         nullable=True,
         default=None,
         init=False,
@@ -127,7 +127,7 @@ class DocumentNode(NodeBase):
     __table_args__ = {"schema": "processed"}
 
     id: Mapped[str] = mapped_column(Text(), primary_key=True)
-    url: Mapped[str] = mapped_column(Text(), nullable=False)
+    doi_url: Mapped[str] = mapped_column(Text(), nullable=False)
     authors: Mapped[str | None] = mapped_column(Text(), nullable=True, default=None)
     title: Mapped[str | None] = mapped_column(Text(), nullable=True, default=None)
     comments: Mapped[str | None] = mapped_column(Text(), nullable=True, default=None)

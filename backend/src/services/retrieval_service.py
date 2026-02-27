@@ -27,24 +27,29 @@ _QUERY_WHITESPACE_RE = re.compile(r"\s+")
 _HYBRID_RETRIEVE_SQL = sa_text(
     """
     SELECT
-        chunk_id,
-        document_id,
-        url,
-        chunk_text,
-        node_metadata,
-        text_rank,
-        vector_rank,
-        rrf_score
+        r.chunk_id,
+        r.document_id,
+        d.doi_url,
+        d.authors,
+        d.title,
+        d.journal_ref,
+        r.chunk_text,
+        r.node_metadata,
+        r.text_rank,
+        r.vector_rank,
+        r.rrf_score
     FROM processed.hybrid_retrieve(
         :query,
-        CAST(:embedding AS vector(1024)),
+        CAST(:embedding AS halfvec(1024)),
         :text_k,
         :vec_k,
         :fused_k,
         :rrf_k,
         :text_weight,
         :vector_weight
-    )
+    ) AS r
+    JOIN processed.documents AS d
+      ON d.id = r.document_id
     """,
 )
 
@@ -90,7 +95,7 @@ class RetrievalService:
             except RerankingServiceError as e:
                 logfire.exception(f"Reranking failed: {e!s}")
 
-        return merged[: RETRIEVAL_SETTINGS.top_n]
+        return merged[: RERANKER_SETTINGS.top_k]
 
     @staticmethod
     def _normalize_query(query: str) -> str:
@@ -120,7 +125,10 @@ class RetrievalService:
             RetrievedChunk(
                 chunk_id=chunk_id,
                 document_id=document_id,
-                url=url,
+                doi_url=doi_url,
+                authors=authors,
+                title=title,
+                journal_ref=journal_ref,
                 path=node_metadata.get("path") if node_metadata else None,
                 text=chunk_text,
                 text_rank=text_rank,
@@ -130,7 +138,10 @@ class RetrievalService:
             for (
                 chunk_id,
                 document_id,
-                url,
+                doi_url,
+                authors,
+                title,
+                journal_ref,
                 chunk_text,
                 node_metadata,
                 text_rank,

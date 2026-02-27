@@ -42,7 +42,7 @@ def sample_document_node(session):
     """Create and persist a sample document node."""
     doc = DocumentNode(
         id="source-1",
-        url="https://arxiv.org/abs/source-1",
+        doi_url="https://www.doi.org/10.48550/arXiv.source-1",
         text="Document content",
     )
     session.add(doc)
@@ -179,14 +179,14 @@ class TestDocumentNode:
         """Test creating a DocumentNode with required fields."""
         node = DocumentNode(
             id="source-1",
-            url="https://arxiv.org/abs/source-1",
+            doi_url="https://www.doi.org/10.48550/arXiv.source-1",
             text="Document",
         )
         session.add(node)
         session.flush()
 
         assert node.id == "source-1"
-        assert node.url == "https://arxiv.org/abs/source-1"
+        assert node.doi_url == "https://www.doi.org/10.48550/arXiv.source-1"
         assert node.text == "Document"
         assert node.source_id == "source-1"
 
@@ -194,7 +194,7 @@ class TestDocumentNode:
         """Test DocumentNode's relationship with TextNode children."""
         doc = DocumentNode(
             id="source-1",
-            url="https://arxiv.org/abs/source-1",
+            doi_url="https://www.doi.org/10.48550/arXiv.source-1",
             text="Document",
         )
         session.add(doc)
@@ -214,7 +214,7 @@ class TestDocumentNode:
     def test_delete_document_does_not_cascade_to_chunks(self, session):
         doc = DocumentNode(
             id="source-1",
-            url="https://arxiv.org/abs/source-1",
+            doi_url="https://www.doi.org/10.48550/arXiv.source-1",
             text="Document",
         )
         child = TextNode(text="Child")
