@@ -2,6 +2,9 @@ import { useState, useRef, useEffect } from "react";
 import { Send, Sparkles } from "lucide-react";
 import type { Conversation, AgentStatus } from "@/pages/Index";
 import ReactMarkdown from "react-markdown";
+import rehypeKatex from "rehype-katex";
+import remarkMath from "remark-math";
+import "katex/dist/katex.min.css";
 import ThinkingIndicator from "@/components/ThinkingIndicator";
 
 interface Props {
@@ -122,6 +125,8 @@ const ChatArea = ({ conversation, onSend, agentStatus }: Props) => {
                   {msg.role === "assistant" ? (
                     <div className="max-w-none font-sans text-[15px] leading-7 text-foreground [&_p]:my-0 [&_p+*]:mt-4 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_strong]:font-semibold [&_h1]:my-4 [&_h1]:text-[15px] [&_h1]:font-semibold [&_h2]:my-4 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:my-4 [&_h3]:text-[15px] [&_h3]:font-semibold [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-accent [&_pre]:p-3 [&_pre]:text-accent-foreground [&_code]:rounded [&_code]:bg-accent [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.9em] [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2">
                       <ReactMarkdown
+                        remarkPlugins={[remarkMath]}
+                        rehypePlugins={[rehypeKatex]}
                         components={{
                           a: ({ href, children }) => (
                             <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:opacity-70 transition-opacity">
