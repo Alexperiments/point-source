@@ -100,7 +100,11 @@ class LiteLLMRerankingModel(RerankingModel):
             timeout=self.settings.timeout_seconds,
         )
         try:
-            parsed_response = _LiteLLMRerankResponse.model_validate(response)
+            parsed_response = _LiteLLMRerankResponse.model_validate(
+                response.model_dump(mode="python")
+                if isinstance(response, BaseModel)
+                else response,
+            )
         except ValidationError as exc:
             raise ValueError("Invalid LiteLLM rerank response schema.") from exc
 
