@@ -1,15 +1,17 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Sparkles } from "lucide-react";
+import { Check, Copy, RotateCcw, Send, Sparkles } from "lucide-react";
 import type { Conversation, AgentStatus } from "@/pages/Index";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import ThinkingIndicator from "@/components/ThinkingIndicator";
+import { toast } from "sonner";
 
 interface Props {
   conversation: Conversation | null;
   onSend: (content: string) => void;
+  onRetry: (assistantMessageId: string) => void;
   agentStatus: AgentStatus;
 }
 
@@ -58,8 +60,9 @@ const normalizeAssistantMarkdown = (content: string): string => {
   return lines.join("\n");
 };
 
-const ChatArea = ({ conversation, onSend, agentStatus }: Props) => {
+const ChatArea = ({ conversation, onSend, onRetry, agentStatus }: Props) => {
   const [input, setInput] = useState("");
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -88,6 +91,24 @@ const ChatArea = ({ conversation, onSend, agentStatus }: Props) => {
   };
 
   const messages = conversation?.messages ?? [];
+  const lastAssistantMessageId = [...messages].reverse().find((m) => m.role === "assistant")?.id;
+
+  const handleCopy = async (messageId: string, content: string) => {
+    if (!navigator.clipboard) {
+      toast.error("Clipboard is not available.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMessageId(messageId);
+      window.setTimeout(() => {
+        setCopiedMessageId((current) => (current === messageId ? null : current));
+      }, 1200);
+    } catch {
+      toast.error("Failed to copy response.");
+    }
+  };
 
   return (
     <div className="flex flex-1 flex-col min-w-0">
@@ -123,18 +144,41 @@ const ChatArea = ({ conversation, onSend, agentStatus }: Props) => {
                     {msg.role === "user" ? "You" : "Assistant"}
                   </p>
                   {msg.role === "assistant" ? (
-                    <div className="max-w-none font-sans text-[15px] leading-7 text-foreground [&_p]:my-0 [&_p+*]:mt-4 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_strong]:font-semibold [&_h1]:my-4 [&_h1]:text-[15px] [&_h1]:font-semibold [&_h2]:my-4 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:my-4 [&_h3]:text-[15px] [&_h3]:font-semibold [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-accent [&_pre]:p-3 [&_pre]:text-accent-foreground [&_code]:rounded [&_code]:bg-accent [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.9em] [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkMath]}
-                        rehypePlugins={[rehypeKatex]}
-                        components={{
-                          a: ({ href, children }) => (
-                            <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:opacity-70 transition-opacity">
-                              {children}
-                            </a>
-                          ),
-                        }}
-                      >{normalizeAssistantMarkdown(msg.content)}</ReactMarkdown>
+                    <div>
+                      <div className="max-w-none font-sans text-[15px] leading-7 text-foreground [&_p]:my-0 [&_p+*]:mt-4 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_strong]:font-semibold [&_h1]:my-4 [&_h1]:text-[15px] [&_h1]:font-semibold [&_h2]:my-4 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:my-4 [&_h3]:text-[15px] [&_h3]:font-semibold [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-accent [&_pre]:p-3 [&_pre]:text-accent-foreground [&_code]:rounded [&_code]:bg-accent [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.9em] [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkMath]}
+                          rehypePlugins={[rehypeKatex]}
+                          components={{
+                            a: ({ href, children }) => (
+                              <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:opacity-70 transition-opacity">
+                                {children}
+                              </a>
+                            ),
+                          }}
+                        >{normalizeAssistantMarkdown(msg.content)}</ReactMarkdown>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2 text-xs">
+                        <button
+                          onClick={() => void handleCopy(msg.id, msg.content)}
+                          className="flex items-center gap-1 rounded-md px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                          aria-label="Copy assistant response"
+                        >
+                          {copiedMessageId === msg.id ? <Check size={13} /> : <Copy size={13} />}
+                          {copiedMessageId === msg.id ? "Copied" : "Copy"}
+                        </button>
+                        {msg.id === lastAssistantMessageId && (
+                          <button
+                            onClick={() => onRetry(msg.id)}
+                            disabled={agentStatus !== "idle"}
+                            className="flex items-center gap-1 rounded-md px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            aria-label="Retry assistant response"
+                          >
+                            <RotateCcw size={13} />
+                            Retry
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     <div className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">

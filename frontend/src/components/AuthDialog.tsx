@@ -86,7 +86,7 @@ const AuthDialog = ({ open, mode, onModeChange, onClose }: Props) => {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder="Jane Doe"
+                placeholder="Ada Lovelace"
                 required
               />
             </div>
@@ -103,7 +103,7 @@ const AuthDialog = ({ open, mode, onModeChange, onClose }: Props) => {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder="you@example.com"
+              placeholder="ada.lovelace@example.com"
               required
             />
           </div>

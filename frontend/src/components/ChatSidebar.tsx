@@ -22,11 +22,21 @@ interface Props {
   onSelect: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
+  loginPromptVersion: number;
   open: boolean;
   onClose: () => void;
 }
 
-const ChatSidebar = ({ conversations, activeId, onSelect, onNew, onDelete, open, onClose }: Props) => {
+const ChatSidebar = ({
+  conversations,
+  activeId,
+  onSelect,
+  onNew,
+  onDelete,
+  loginPromptVersion,
+  open,
+  onClose,
+}: Props) => {
   const navigate = useNavigate();
   const { user, logout, isLoading } = useAuth();
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
@@ -47,6 +57,12 @@ const ChatSidebar = ({ conversations, activeId, onSelect, onNew, onDelete, open,
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [profileMenuOpen]);
+
+  useEffect(() => {
+    if (loginPromptVersion === 0) return;
+    setAuthMode("login");
+    setAuthDialogOpen(true);
+  }, [loginPromptVersion]);
 
   const openAuthDialog = (mode: "login" | "register") => {
     setAuthMode(mode);
