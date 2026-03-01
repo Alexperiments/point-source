@@ -58,6 +58,11 @@ class User(Base):
         server_default=text("false"),
         nullable=False,
     )
+    is_premium: Mapped[bool] = mapped_column(
+        Boolean,
+        server_default=text("false"),
+        nullable=False,
+    )
 
     user_threads = relationship(
         "Thread",

@@ -5,6 +5,12 @@ import { Menu } from "lucide-react";
 import { streamChat } from "@/lib/StreamChat";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
+import {
+  createThread,
+  deleteThread,
+  listThreads,
+  type ThreadPayload,
+} from "@/lib/ThreadsApi";
 
 export interface ChatMessage {
   id: string;
@@ -17,9 +23,24 @@ export interface Conversation {
   title: string;
   messages: ChatMessage[];
   createdAt: Date;
+  updatedAt: Date;
 }
 
 export type AgentStatus = "idle" | "thinking" | "retrieving" | "streaming";
+
+const toConversation = (thread: ThreadPayload): Conversation => ({
+  id: thread.id,
+  title: thread.title?.trim() || "New chat",
+  createdAt: new Date(thread.created_at),
+  updatedAt: new Date(thread.updated_at),
+  messages: thread.messages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .map((message) => ({
+      id: message.id,
+      role: message.role === "user" ? "user" : "assistant",
+      content: message.content,
+    })),
+});
 
 const Index = () => {
   const { user, isLoading } = useAuth();
@@ -32,21 +53,46 @@ const Index = () => {
   const activeConversation = conversations.find((c) => c.id === activeId) ?? null;
 
   useEffect(() => {
-    if (isLoading || user) return;
-    setConversations([]);
-    setActiveId(null);
-    setAgentStatus("idle");
+    if (isLoading) return;
+
+    if (!user) {
+      setConversations([]);
+      setActiveId(null);
+      setAgentStatus("idle");
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadHistory = async () => {
+      try {
+        const threads = await listThreads();
+        if (cancelled) return;
+
+        const loadedConversations = threads.map(toConversation);
+        setConversations(loadedConversations);
+        setActiveId((prev) => {
+          if (prev && loadedConversations.some((conversation) => conversation.id === prev)) {
+            return prev;
+          }
+          return loadedConversations[0]?.id ?? null;
+        });
+      } catch (error: any) {
+        if (!cancelled) {
+          toast.error(error?.message || "Failed to load chat history.");
+        }
+      }
+    };
+
+    void loadHistory();
+
+    return () => {
+      cancelled = true;
+    };
   }, [isLoading, user]);
 
   const createConversation = () => {
-    const conv: Conversation = {
-      id: crypto.randomUUID(),
-      title: "New chat",
-      messages: [],
-      createdAt: new Date(),
-    };
-    setConversations((prev) => [conv, ...prev]);
-    setActiveId(conv.id);
+    setActiveId(null);
   };
 
   const streamAssistantReply = async ({
@@ -61,6 +107,7 @@ const Index = () => {
     let assistantSoFar = "";
 
     await streamChat({
+      threadId: convId,
       messages: apiMessages,
       onStatus: (status) => {
         if (status === "retrieving_documents") {
@@ -88,6 +135,7 @@ const Index = () => {
             if (last?.id === assistantId) {
               return {
                 ...c,
+                updatedAt: new Date(),
                 messages: c.messages.map((m) =>
                   m.id === assistantId ? { ...m, content: updatedContent } : m
                 ),
@@ -95,6 +143,7 @@ const Index = () => {
             }
             return {
               ...c,
+              updatedAt: new Date(),
               messages: [
                 ...c.messages,
                 { id: assistantId, role: "assistant" as const, content: updatedContent },
@@ -108,29 +157,29 @@ const Index = () => {
   };
 
   const sendMessage = async (content: string) => {
-    if (isLoading || agentStatus !== "idle") return;
+    if (isLoading) return;
     if (!user) {
       setLoginPromptVersion((prev) => prev + 1);
       toast.error("Please log in to start chatting.");
       return;
     }
+    if (agentStatus !== "idle") return;
 
     let convId = activeId;
     let currentMessages: ChatMessage[] = [];
 
-    if (!convId) {
-      const conv: Conversation = {
-        id: crypto.randomUUID(),
-        title: content.slice(0, 40),
-        messages: [],
-        createdAt: new Date(),
-      };
-      setConversations((prev) => [conv, ...prev]);
-      convId = conv.id;
-      setActiveId(conv.id);
-      currentMessages = [];
-    } else {
-      currentMessages = conversations.find((c) => c.id === convId)?.messages ?? [];
+    try {
+      if (!convId) {
+        const thread = await createThread(content.slice(0, 40));
+        convId = thread.id;
+        setActiveId(convId);
+        setConversations((prev) => [toConversation(thread), ...prev]);
+      } else {
+        currentMessages = conversations.find((c) => c.id === convId)?.messages ?? [];
+      }
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to create chat.");
+      return;
     }
 
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", content };
@@ -141,6 +190,7 @@ const Index = () => {
         return {
           ...c,
           title: c.messages.length === 0 ? content.slice(0, 40) : c.title,
+          updatedAt: new Date(),
           messages: [...c.messages, userMsg],
         };
       })
@@ -168,47 +218,29 @@ const Index = () => {
 
   const retryAssistantMessage = async (assistantMessageId: string) => {
     if (isLoading || agentStatus !== "idle" || !activeConversation) return;
-    if (!user) {
-      setLoginPromptVersion((prev) => prev + 1);
-      toast.error("Please log in to retry.");
-      return;
-    }
 
     const targetIndex = activeConversation.messages.findIndex((m) => m.id === assistantMessageId);
     if (targetIndex <= 0) return;
 
-    const targetMessage = activeConversation.messages[targetIndex];
     const previousMessage = activeConversation.messages[targetIndex - 1];
-    if (targetMessage?.role !== "assistant" || previousMessage?.role !== "user") return;
+    if (previousMessage?.role !== "user") return;
 
-    const replayMessages = activeConversation.messages.slice(0, targetIndex);
-    const convId = activeConversation.id;
-
-    setConversations((prev) =>
-      prev.map((c) => (c.id === convId ? { ...c, messages: replayMessages } : c))
-    );
-    setAgentStatus("thinking");
-
-    const apiMessages = replayMessages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
-
-    try {
-      await streamAssistantReply({
-        convId,
-        apiMessages,
-        assistantId: assistantMessageId,
-      });
-    } catch (e: any) {
-      setAgentStatus("idle");
-      toast.error(e.message || "Failed to regenerate response");
-    }
+    await sendMessage(previousMessage.content);
   };
 
-  const deleteConversation = (id: string) => {
-    setConversations((prev) => prev.filter((c) => c.id !== id));
-    if (activeId === id) setActiveId(null);
+  const deleteConversation = async (id: string) => {
+    if (isLoading || !user) return;
+
+    try {
+      await deleteThread(id);
+      setConversations((prev) => {
+        const next = prev.filter((c) => c.id !== id);
+        setActiveId((current) => (current === id ? (next[0]?.id ?? null) : current));
+        return next;
+      });
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to delete chat.");
+    }
   };
 
   return (

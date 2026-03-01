@@ -100,6 +100,7 @@ def test_user_response_serialization():
         email="test@example.com",
         created_at=now,
         is_superuser=False,
+        is_premium=False,
     )
     assert resp.id == uid
     assert resp.created_at == now
@@ -116,6 +117,7 @@ def test_user_response_from_attributes():
             self.created_at = datetime.now()
             self.updated_at = None
             self.is_superuser = True
+            self.is_premium = True
             # extra fields should be ignored
             self.hashed_password = "hash"
 
@@ -124,6 +126,7 @@ def test_user_response_from_attributes():
 
     assert resp.name == "ORM User"
     assert resp.is_superuser is True
+    assert resp.is_premium is True
     assert resp.id == orm_obj.id
 
 
@@ -136,6 +139,7 @@ def test_user_list_response():
         email="a@a.com",
         created_at=now,
         is_superuser=False,
+        is_premium=False,
     )
 
     lst = UserListResponse(

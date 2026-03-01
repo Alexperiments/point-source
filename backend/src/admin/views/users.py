@@ -40,6 +40,7 @@ class UsersView(ModelView):
         ),
         "is_deleted",
         "is_superuser",
+        "is_premium",
     ]
 
     page_size = 5

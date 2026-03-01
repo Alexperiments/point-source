@@ -1,10 +1,12 @@
 """LLM service for running agents."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
+from pydantic_ai.messages import ModelMessage
 from pydantic_ai.usage import UsageLimits
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +21,10 @@ from src.models.user import User
 
 class LLMServiceError(Exception):
     """Exception for LLM service errors."""
+
+
+class DailyMessageLimitExceededError(LLMServiceError):
+    """Raised when a non-premium user exceeds their daily message cap."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +58,42 @@ class LLMService:
             kwargs["tool_calls_limit"] = AGENT_SETTINGS.tool_calls_limit
         return UsageLimits(**kwargs)
 
+    @staticmethod
+    def _seconds_until_next_midnight_utc(now: datetime) -> int:
+        tomorrow = now.date() + timedelta(days=1)
+        next_midnight = datetime.combine(tomorrow, datetime.min.time(), tzinfo=UTC)
+        return max(1, int((next_midnight - now).total_seconds()))
+
+    async def enforce_daily_message_limit(self, user: User) -> None:
+        """Enforce per-user daily message cap for non-premium users."""
+        if user.is_premium:
+            return
+
+        daily_limit = AGENT_SETTINGS.daily_message_limit
+        now = datetime.now(tz=UTC)
+        day_key = now.date().isoformat()
+        key = f"daily_message_limit:{day_key}:{user.id}"
+
+        try:
+            current_count = await self.redis.incr(key)
+            if current_count == 1:
+                await self.redis.expire(
+                    key,
+                    self._seconds_until_next_midnight_utc(now),
+                )
+        except Exception as e:
+            raise LLMServiceError(
+                f"Failed to enforce daily message limit: {e!s}",
+            ) from e
+
+        if current_count > daily_limit:
+            raise DailyMessageLimitExceededError(
+                (
+                    f"Daily message limit reached ({daily_limit}). "
+                    "Limit resets at 00:00 UTC."
+                ),
+            )
+
     async def run_agent(
         self,
         user: User,
@@ -62,6 +104,7 @@ class LLMService:
         Args:
             user: The user running the agent.
             user_prompt: The user's prompt/query.
+            message_history: Optional prior conversation context for the run.
 
         Returns:
             The agent's response as a string.
@@ -89,12 +132,14 @@ class LLMService:
         self,
         user: User,
         user_prompt: str,
+        message_history: Sequence[ModelMessage] | None = None,
     ) -> AsyncIterator[LLMStreamEvent]:
         """Run the main agent and stream status + response token deltas.
 
         Args:
             user: The user running the agent.
             user_prompt: The user's prompt/query.
+            message_history: Optional prior conversation context for the run.
 
         Yields:
             `LLMStreamEvent` items for status transitions and text deltas.
@@ -114,6 +159,7 @@ class LLMService:
                 async with asyncio.timeout(AGENT_SETTINGS.stream_timeout_seconds):
                     async with get_main_agent().run_stream(
                         user_prompt=user_prompt,
+                        message_history=message_history,
                         deps=MainAgentDependencies(
                             user_name=user.name or user.email,
                             session=self.session,

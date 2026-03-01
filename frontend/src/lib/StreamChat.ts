@@ -35,11 +35,13 @@ const handleParsedPayload = (
 
 export async function streamChat({
   messages,
+  threadId,
   onDelta,
   onDone,
   onStatus,
 }: {
   messages: Msg[];
+  threadId?: string;
   onDelta: (deltaText: string) => void;
   onDone: () => void;
   onStatus?: (status: StreamStatus | string) => void;
@@ -51,7 +53,7 @@ export async function streamChat({
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, thread_id: threadId }),
   });
 
   if (resp.status === 429) throw new Error("Rate limited — please try again later.");

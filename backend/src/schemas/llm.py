@@ -1,5 +1,6 @@
 """LLM schemas."""
 
+import uuid
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -36,3 +37,7 @@ class LLMStreamRequest(BaseModel):
 
     messages: list[LLMStreamMessage] = Field(default_factory=list)
     prompt: str | None = Field(default=None, min_length=1)
+    thread_id: uuid.UUID | None = Field(
+        default=None,
+        description="Existing thread ID for persisting chat history.",
+    )

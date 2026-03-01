@@ -15,7 +15,6 @@ from starlette.middleware.sessions import SessionMiddleware
 from src.admin import admin
 from src.api import router
 from src.core.config import PROJECT_INFO, settings
-from src.web import router as web_router
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -54,7 +53,7 @@ config = SecurityConfig(
     },
     enable_cors=True,
     cors_allow_origins=settings.allowed_origins_list,
-    cors_allow_methods=["GET", "POST"],
+    cors_allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     cors_allow_headers=["*"],
     cors_allow_credentials=settings.environment != "development",
     passive_mode=True,
@@ -82,7 +81,6 @@ app.add_middleware(
     secret_key=settings.jwt_secret_key.get_secret_value(),
 )
 app.include_router(router)
-app.include_router(web_router, prefix="/legacy")
 admin.mount_to(app)
 app.add_middleware(SecurityMiddleware, config=config)
 

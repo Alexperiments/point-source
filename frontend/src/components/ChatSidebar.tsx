@@ -4,6 +4,7 @@ import {
   LogIn,
   LogOut,
   MessageSquare,
+  MoreHorizontal,
   Plus,
   Trash2,
   User,
@@ -42,6 +43,7 @@ const ChatSidebar = ({
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [conversationMenuId, setConversationMenuId] = useState<string | null>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -57,6 +59,20 @@ const ChatSidebar = ({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [profileMenuOpen]);
+
+  useEffect(() => {
+    if (!conversationMenuId) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest("[data-conversation-menu]")) {
+        setConversationMenuId(null);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [conversationMenuId]);
 
   useEffect(() => {
     if (loginPromptVersion === 0) return;
@@ -77,8 +93,8 @@ const ChatSidebar = ({
     .slice(0, 2)
     .toUpperCase();
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     setProfileMenuOpen(false);
     toast.success("You are now logged out.");
   };
@@ -132,7 +148,10 @@ const ChatSidebar = ({
             {/* Header */}
             <div className="flex items-center justify-between p-3">
               <button
-                onClick={onNew}
+                onClick={() => {
+                  setConversationMenuId(null);
+                  onNew();
+                }}
                 className="flex flex-1 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
               >
                 <Plus size={16} />
@@ -154,28 +173,53 @@ const ChatSidebar = ({
                 </p>
               )}
               {conversations.map((conv) => (
-                <div
-                  key={conv.id}
-                  className={`
-                    group flex items-center gap-2 rounded-lg px-3 py-2 mb-0.5 cursor-pointer text-sm transition-colors
-                    ${conv.id === activeId
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent/60"
-                    }
-                  `}
-                  onClick={() => onSelect(conv.id)}
-                >
-                  <MessageSquare size={14} className="shrink-0 opacity-50" />
-                  <span className="flex-1 truncate">{conv.title}</span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDelete(conv.id);
+                <div key={conv.id} className="relative">
+                  <div
+                    className={`
+                      group flex items-center gap-2 rounded-lg px-3 py-2 mb-0.5 cursor-pointer text-sm transition-colors
+                      ${conv.id === activeId
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                        : "text-sidebar-foreground hover:bg-sidebar-accent/60"
+                      }
+                    `}
+                    onClick={() => {
+                      setConversationMenuId(null);
+                      onSelect(conv.id);
                     }}
-                    className="opacity-0 group-hover:opacity-100 rounded p-1 hover:bg-destructive/10 hover:text-destructive transition-all"
                   >
-                    <Trash2 size={13} />
-                  </button>
+                    <MessageSquare size={14} className="shrink-0 opacity-50" />
+                    <span className="flex-1 truncate">{conv.title}</span>
+                    <button
+                      data-conversation-menu
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConversationMenuId((prev) => (prev === conv.id ? null : conv.id));
+                      }}
+                      className="opacity-0 group-hover:opacity-100 rounded p-1 hover:bg-accent transition-all"
+                      aria-label="Open chat options"
+                    >
+                      <MoreHorizontal size={13} />
+                    </button>
+                  </div>
+
+                  {conversationMenuId === conv.id && (
+                    <div
+                      data-conversation-menu
+                      className="absolute right-2 top-9 z-20 min-w-32 rounded-lg border border-border bg-popover p-1 shadow-lg"
+                    >
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConversationMenuId(null);
+                          void onDelete(conv.id);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-destructive transition-colors hover:bg-destructive/10"
+                      >
+                        <Trash2 size={13} />
+                        Delete chat
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

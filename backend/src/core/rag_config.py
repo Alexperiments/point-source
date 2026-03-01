@@ -160,6 +160,8 @@ class AgentSettings(BaseSettings):
     instruction_slug: str = Field(default="main_agent_instructions")
     request_limit: int = Field(default=50, ge=1)
     tool_calls_limit: int | None = Field(default=None, ge=1)
+    daily_message_limit: int = Field(default=3, ge=1)
+    history_max_messages: int = Field(default=10, ge=0)
     stream_timeout_seconds: int = Field(default=180, ge=5)
 
 

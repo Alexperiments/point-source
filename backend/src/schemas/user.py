@@ -95,6 +95,10 @@ class UserResponse(UserBase):
         ...,
         description="Whether the user is a superuser",
     )
+    is_premium: bool = Field(
+        ...,
+        description="Whether the user is a premium user",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
