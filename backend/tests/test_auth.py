@@ -154,6 +154,31 @@ async def test_login_invalid_password(
 
 
 @pytest.mark.asyncio
+async def test_login_deleted_user_fails(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """Soft-deleted users should not be able to obtain access tokens."""
+    password = "SecurePass123"
+    user = User(
+        name="Deleted User",
+        email="deleted@example.com",
+        hashed_password=hash_password(password),
+        is_deleted=True,
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    response = await client.post(
+        "/v1/auth/token",
+        json={"email": user.email, "password": password},
+    )
+
+    assert response.status_code == 401
+    assert "incorrect email or password" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
 async def test_validate_token_success(
     client: AsyncClient,
     db_session: AsyncSession,
@@ -257,6 +282,38 @@ async def test_get_current_user_missing_token(client: AsyncClient) -> None:
     response = await client.get("/v1/auth/users/me")
 
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_revokes_access_token(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """Logout should invalidate existing bearer tokens."""
+    password = "SecurePass123"
+    user = User(
+        name="Token User",
+        email="token-user@example.com",
+        hashed_password=hash_password(password),
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    login_response = await client.post(
+        "/v1/auth/token",
+        json={"email": user.email, "password": password},
+    )
+    token = login_response.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    me_before = await client.get("/v1/auth/users/me", headers=headers)
+    assert me_before.status_code == 200
+
+    logout_response = await client.post("/v1/auth/logout", headers=headers)
+    assert logout_response.status_code == 204
+
+    me_after = await client.get("/v1/auth/users/me", headers=headers)
+    assert me_after.status_code == 401
 
 
 @pytest.mark.asyncio

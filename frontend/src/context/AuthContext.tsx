@@ -33,7 +33,7 @@ type AuthContextValue = {
   login: (input: LoginInput) => Promise<void>;
   register: (input: RegisterInput) => Promise<void>;
   updateProfile: (input: ProfileUpdateInput) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -261,7 +261,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    const token = getAccessToken();
+    if (token) {
+      try {
+        await requestJson(`${AUTH_BASE_URL}/logout`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      } catch {
+        // Ignore logout request failures and clear local auth state anyway.
+      }
+    }
     clearAccessToken();
     setUser(null);
   };

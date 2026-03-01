@@ -19,6 +19,23 @@ from src.services.auth_service import (
 from src.services.user_service import UserAlreadyExistsError
 
 
+class _FakeRedis:
+    def __init__(self) -> None:
+        self._values: dict[str, str] = {}
+
+    async def get(self, key: str) -> str | None:
+        return self._values.get(key)
+
+    async def set(self, key: str, value: str) -> bool:
+        self._values[key] = value
+        return True
+
+    async def incr(self, key: str) -> int:
+        next_value = int(self._values.get(key, "0")) + 1
+        self._values[key] = str(next_value)
+        return next_value
+
+
 @pytest.mark.asyncio
 async def test_register_user_success(db_session: AsyncSession) -> None:
     """Test successful user registration."""
@@ -128,6 +145,30 @@ async def test_authenticate_user_invalid_password(
 
 
 @pytest.mark.asyncio
+async def test_authenticate_user_deleted_user_fails(
+    db_session: AsyncSession,
+) -> None:
+    """Deleted users should not authenticate."""
+    auth_service = AuthService(db_session)
+    user = User(
+        name="Deleted User",
+        email="deleted@example.com",
+        hashed_password=hash_password("SecurePass123"),
+        is_deleted=True,
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    with pytest.raises(InvalidCredentialsError):
+        await auth_service.authenticate_user(
+            UserLogin(
+                email="deleted@example.com",
+                password=SecretStr("SecurePass123"),
+            ),
+        )
+
+
+@pytest.mark.asyncio
 async def test_create_token_success(db_session: AsyncSession) -> None:
     """Test successful token creation."""
     auth_service = AuthService(db_session)
@@ -156,7 +197,7 @@ async def test_create_token_success(db_session: AsyncSession) -> None:
         issuer=settings.jwt_issuer,
         audience=settings.jwt_audience,
     )
-    assert payload["sub"] == user.email
+    assert payload["sub"] == str(user.id)
     assert "exp" in payload
 
 
@@ -188,7 +229,7 @@ async def test_create_token_with_custom_expires_delta(
         issuer=settings.jwt_issuer,
         audience=settings.jwt_audience,
     )
-    assert payload["sub"] == user.email
+    assert payload["sub"] == str(user.id)
 
     # Check expiration is approximately 60 minutes from now
     exp_timestamp = payload["exp"]
@@ -234,7 +275,7 @@ async def test_login_success(db_session: AsyncSession) -> None:
         issuer=settings.jwt_issuer,
         audience=settings.jwt_audience,
     )
-    assert payload["sub"] == user.email
+    assert payload["sub"] == str(user.id)
 
 
 @pytest.mark.asyncio
@@ -585,7 +626,7 @@ async def test_create_token_includes_issuer_audience(
         issuer=settings.jwt_issuer,
         audience=settings.jwt_audience,
     )
-    assert payload["sub"] == user.email
+    assert payload["sub"] == str(user.id)
     assert payload["iss"] == settings.jwt_issuer
     assert payload["aud"] == settings.jwt_audience
     assert "exp" in payload
@@ -611,7 +652,7 @@ async def test_get_user_from_token_expired_within_leeway(
     # Create token expired 60s ago (within default 120s leeway)
     expired_token = jwt.encode(
         {
-            "sub": user.email,
+            "sub": str(user.id),
             "exp": datetime.now(UTC) - timedelta(seconds=60),
             "iss": settings.jwt_issuer,
             "aud": settings.jwt_audience,
@@ -672,7 +713,7 @@ async def test_get_user_from_token_nbf_within_leeway(
     # Create token with nbf 60s in future (within default 120s leeway)
     future_token = jwt.encode(
         {
-            "sub": user.email,
+            "sub": str(user.id),
             "exp": datetime.now(UTC) + timedelta(hours=1),
             "nbf": datetime.now(UTC) + timedelta(seconds=60),
             "iss": settings.jwt_issuer,
@@ -713,3 +754,24 @@ async def test_get_user_from_token_nbf_beyond_leeway(
     # Should fail because nbf is beyond leeway
     with pytest.raises(TokenValidationError):
         await auth_service.get_user_from_token(future_token)
+
+
+@pytest.mark.asyncio
+async def test_revoked_token_is_rejected(db_session: AsyncSession) -> None:
+    """Token version bump should invalidate previously issued tokens."""
+    redis = _FakeRedis()
+    auth_service = AuthService(db_session, redis=redis)  # type: ignore[arg-type]
+    user = User(
+        name="Revoked User",
+        email="revoked@example.com",
+        hashed_password=hash_password("SecurePass123"),
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    token = await auth_service.create_token_for_user(user)
+    await auth_service.revoke_user_tokens(user)
+
+    with pytest.raises(TokenValidationError, match="revoked"):
+        await auth_service.get_user_from_token(token.access_token)

@@ -21,8 +21,8 @@ const Profile = () => {
     setEmail(user.email);
   }, [user]);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     toast.success("You are now logged out.");
     navigate("/");
   };

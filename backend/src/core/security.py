@@ -9,7 +9,7 @@ from jose import jwt
 from src.core.config import settings
 
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token", scheme_name="Bearer")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/v1/auth/token", scheme_name="Bearer")
 
 
 def hash_password(password: str) -> str:

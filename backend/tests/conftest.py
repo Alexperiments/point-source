@@ -11,12 +11,35 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import StaticPool
 
+from src.api.v1.auth import get_redis as get_auth_redis
 from src.core.database.base import Base, get_async_session
 from src.main import app
 
 
 # Use in-memory SQLite for testing
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+
+
+class _FakeRedis:
+    """Simple in-memory Redis stub for auth token versioning tests."""
+
+    def __init__(self) -> None:
+        self._values: dict[str, str] = {}
+
+    async def get(self, key: str) -> str | None:
+        return self._values.get(key)
+
+    async def set(self, key: str, value: str) -> bool:
+        self._values[key] = value
+        return True
+
+    async def incr(self, key: str) -> int:
+        next_value = int(self._values.get(key, "0")) + 1
+        self._values[key] = str(next_value)
+        return next_value
+
+    async def aclose(self) -> None:
+        return None
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -66,7 +89,14 @@ async def client(
     async def override_get_session() -> AsyncGenerator[AsyncSession, None]:
         yield db_session
 
+    redis = _FakeRedis()
+
+    async def override_auth_redis() -> AsyncGenerator[_FakeRedis, None]:
+        yield redis
+        await redis.aclose()
+
     app.dependency_overrides[get_async_session] = override_get_session
+    app.dependency_overrides[get_auth_redis] = override_auth_redis
 
     async with AsyncClient(
         transport=ASGITransport(app=app),

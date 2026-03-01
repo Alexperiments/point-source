@@ -1,12 +1,15 @@
 """Auth API."""
 
+from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import SecretStr, ValidationError
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database.base import get_async_session
+from src.core.database.redis import get_redis_pool
 from src.core.security import hash_password, oauth2_scheme, verify_password
 from src.models.user import User
 from src.schemas.user import (
@@ -30,9 +33,19 @@ from src.services.user_service import UserAlreadyExistsError, UserService
 router = APIRouter()
 
 
+async def get_redis() -> AsyncIterator[Redis]:
+    """Get Redis client dependency for auth/token operations."""
+    redis = await get_redis_pool()
+    try:
+        yield redis
+    finally:
+        await redis.aclose()
+
+
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_async_session),
+    redis: Redis = Depends(get_redis),
 ) -> User:
     """Get the current user."""
     credentials_exception = HTTPException(
@@ -41,7 +54,7 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        auth_service = AuthService(db)
+        auth_service = AuthService(db, redis)
         return await auth_service.get_user_from_token(token)
     except TokenValidationError as e:
         raise credentials_exception from e
@@ -64,10 +77,11 @@ async def register(
 async def login(
     user_data: UserLogin,
     db: Annotated[AsyncSession, Depends(get_async_session)],
+    redis: Annotated[Redis, Depends(get_redis)],
 ) -> Token:
     """Login a user."""
     try:
-        auth_service = AuthService(db)
+        auth_service = AuthService(db, redis)
         return await auth_service.login(user_data)
     except InvalidCredentialsError as e:
         raise HTTPException(
@@ -85,6 +99,18 @@ async def validate_token(
     return TokenValidationResponse(valid=True, user_id=str(current_user.id))
 
 
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_async_session)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> Response:
+    """Invalidate currently active access tokens for the user."""
+    auth_service = AuthService(db, redis)
+    await auth_service.revoke_user_tokens(current_user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/users/me", response_model=UserResponse)
 async def get_current_user_info(
     current_user: Annotated[User, Depends(get_current_user)],
@@ -98,6 +124,7 @@ async def update_current_user_info(
     profile_data: ProfileUpdateRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_async_session)],
+    redis: Annotated[Redis, Depends(get_redis)],
 ) -> ProfileUpdateResponse:
     """Update the current user's profile and optional password."""
     name = (profile_data.name or "").strip()
@@ -131,8 +158,8 @@ async def update_current_user_info(
     token_type = None
 
     if updated:
-        auth_service = AuthService(db)
-        token = auth_service.create_token(user)
+        auth_service = AuthService(db, redis)
+        token = await auth_service.create_token_for_user(user)
         access_token = token.access_token
         token_type = token.token_type
 
