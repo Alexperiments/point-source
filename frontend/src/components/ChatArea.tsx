@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Check, Copy, RotateCcw, Send, Sparkles } from "lucide-react";
+import { Check, Copy, RotateCcw, Send, Telescope } from "lucide-react";
 import type { Conversation, AgentStatus } from "@/pages/Index";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -118,7 +118,7 @@ const ChatArea = ({ conversation, onSend, onRetry, agentStatus }: Props) => {
           <div className="flex h-full items-center justify-center">
             <div className="text-center space-y-3 px-4">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-accent">
-                <Sparkles size={22} className="text-muted-foreground" />
+                <Telescope size={22} className="text-primary/70" />
               </div>
               <h2 className="text-lg font-medium text-foreground">How can I help you today?</h2>
               <p className="text-sm text-muted-foreground max-w-sm">

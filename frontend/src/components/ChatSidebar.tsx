@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
+  CircleHelp,
   LogIn,
   LogOut,
   MessageSquare,
   MoreHorizontal,
   Plus,
+  Telescope,
   Trash2,
   User,
   UserPlus,
@@ -107,6 +109,14 @@ const ChatSidebar = ({
     }
   };
 
+  const openAbout = () => {
+    setProfileMenuOpen(false);
+    navigate("/about");
+    if (window.innerWidth < 768) {
+      onClose();
+    }
+  };
+
   return (
     <>
       {/* Overlay for mobile */}
@@ -129,11 +139,9 @@ const ChatSidebar = ({
           <div className="flex h-full w-64 flex-col">
             <div className="border-b border-sidebar-border px-3 py-3">
               <div className="flex items-center gap-2">
-                <img
-                  src="/point-source-logo.svg"
-                  alt="Point-source logo"
-                  className="h-7 w-7 shrink-0"
-                />
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/60 ring-1 ring-primary/10">
+                  <Telescope size={15} className="text-primary/70" />
+                </div>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-sidebar-foreground">
                     Point-source
@@ -273,6 +281,13 @@ const ChatSidebar = ({
                       >
                         <User size={13} />
                         Profile
+                      </button>
+                      <button
+                        onClick={openAbout}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-popover-foreground transition-colors hover:bg-accent"
+                      >
+                        <CircleHelp size={13} />
+                        About this project
                       </button>
                       <button
                         onClick={handleLogout}
