@@ -1,72 +1,72 @@
-# point-source [WIP]
+# Point-source
 
-A RAG (Retrieval-Augmented Generation) tool for querying astrophysics papers from ArXiv.
+Point-source is an astrophysics RAG assistant.
+It lets you chat with papers and get grounded, citation-oriented answers from a curated scientific corpus.
 
-## The Stack
+> [!NOTE]
+>
+> About this version:
+> PointSource is currently in alpha. The papers available to the system are a curated subset of arXiv rather than the full corpus: specifically, papers in the astro-ph category from the ar5iv HTML project, filtered to documents without parsing errors to prioritize answer quality and citation reliability. The current source dataset is marin-community/ar5iv-no-problem-markdown.
 
-| Component | Tool |
-| --- | --- |
-| **Logic/Agents** | Pydantic AI |
-| **API** | FastAPI |
-| **Database** | PostgreSQL + `pgvector` |
-| **ORM / Migrations** | SQLAlchemy & Alembic |
-| **LLM Gateway** | LiteLLM Proxy |
-| **Caching** | Redis |
-| **Observability** | Logfire |
 
-Most RAG projects rely on high-level wrappers like LangChain. This project intentionally avoids high-levels wrappers like LangChain or LlamaIndex. I wanted to maintain transparency, have a lot of flexbility and having more fun building the logic from scratch.
+## Stack
 
-## Repository Layout
+- Frontend: React, TypeScript, Vite, Tailwind CSS
+- Backend: FastAPI, Pydantic AI, LiteLLM
+- Data: PostgreSQL + pgvector, Redis
 
-- `backend/`: FastAPI app, tests, migrations, scripts, and Python project files.
-- `infra/`: Docker Compose, LiteLLM, Grafana, and Prometheus configuration.
-- `frontend/`: React + Vite frontend application.
-- `deployment/`: Reserved for deployment manifests and automation.
+## Development (Quick Start)
 
-## Roadmap
+### Prerequisites
 
-* [x] Initial Scaffolding
-* [x] Data Modeling
-* [ ] ~~ArXiv PDF Parsers (Handling LaTeX/Math) (skipping for now)~~
-* [x] Chunking with token-aware hierarchical splitter, math-citation-aware
-* [x] Embedding benchmark (evaluation dataset + metrics)
-* [x] Create embeddings
-* [x] Vector Search Implementation
-* [x] Hybrid Search Implementation
-* [x] Generation & Attribution
-* [ ] CLI
-* [ ] Web UI
+- Docker + Docker Compose
+- Node.js 20+
+- Python 3.12 + `uv`
 
-## TODO and possible improvements
-- [ ] Allow the agent to evaluate the retrieved chunks and follow-up with a smart search to get more context from the retrieved papers (e.g. target the abstract or different sections that are cited in the retrieved chunk, to enrich the final result).
-- [ ] Modify the retrieval to correctly provide papers with metadata.
-- [ ] In the new Arxiv ingestion there are more than 80k astro-ph papers. They need chunking and embedding.
+### 1. Configure environment
 
-## Setup & Usage
+- Backend env file is `backend/.env.development`
+- Frontend env file:
 
-### Local Development
+```bash
+cd frontend
+cp .env.example .env
+```
 
-1. Start infra services:
-   - `make docker-dev-up`
-2. Start backend:
-   - `make run-dev`
-3. Start frontend dev server:
-   - `cd frontend && npm ci && npm run dev`
+If you run the frontend with Vite (`npm run dev`), set:
 
-### Single-App Mode (backend serves frontend)
+```bash
+VITE_API_BASE_URL="http://localhost:8000"
+```
 
-1. Build frontend assets:
-   - `cd frontend && npm ci && npm run build`
-2. Start backend:
-   - `make run-dev`
-3. Open `http://localhost:8000`.
+### 2. Build frontend assets (for backend-served UI)
+
+```bash
+cd frontend
+npm ci
+npm run build
+```
+
+### 3. Start the development stack
+
+From repo root:
+
+```bash
+make docker-dev-up
+```
+
+Open:
+
+- App: `http://127.0.0.1:8000`
+
 
 ## Contributing
 
-Open to PRs once the base architecture is settled.
+Contributions are welcome.
 
-## Acknowledgement
+1. Open an issue (bug report, question, or feature request)
+2. Fork and create a branch from `main`
+3. Keep changes focused and include tests when relevant
+4. Open a PR with a clear description and rationale
 
-This project is based on the [pydantic-ai-production-ready-template](https://github.com/m7mdhka/pydantic-ai-production-ready-template).
-
----
+Small improvements, docs fixes, and UX polish are all appreciated.
