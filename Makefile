@@ -6,7 +6,8 @@
 # Monorepo directories
 BACKEND_DIR := backend
 INFRA_DIR := infra
-BACKEND_ENV := $(BACKEND_DIR)/.env.development
+DEVELOPMENT_ENV := $(BACKEND_DIR)/.env.development
+PRODUCTION_ENV := $(BACKEND_DIR)/.env.production
 INFRA_DEV_COMPOSE := $(INFRA_DIR)/docker-compose.dev.yml
 INFRA_COMPOSE := $(INFRA_DIR)/docker-compose.yml
 
@@ -44,31 +45,31 @@ test-cov: ## Run tests with coverage report
 	cd $(BACKEND_DIR) && uv run pytest --cov=src --cov-report=html --cov-report=term
 
 docker-dev-up: ## Start development Docker services
-	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_DEV_COMPOSE) up -d
+	docker-compose --env-file $(DEVELOPMENT_ENV) -f $(INFRA_DEV_COMPOSE) up -d
 
 docker-dev-down: ## Stop development Docker services
-	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_DEV_COMPOSE) down -v
+	docker-compose --env-file $(DEVELOPMENT_ENV) -f $(INFRA_DEV_COMPOSE) down -v
 
 docker-dev-logs: ## View development Docker services logs
-	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_DEV_COMPOSE) logs -f
+	docker-compose --env-file $(DEVELOPMENT_ENV) -f $(INFRA_DEV_COMPOSE) logs -f
 
 docker-dev-restart: ## Restart development Docker services
-	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_DEV_COMPOSE) restart
+	docker-compose --env-file $(DEVELOPMENT_ENV) -f $(INFRA_DEV_COMPOSE) restart
 
 docker-dev-pause: ## Pause development Docker services
-	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_DEV_COMPOSE) stop
+	docker-compose --env-file $(DEVELOPMENT_ENV) -f $(INFRA_DEV_COMPOSE) stop
 
 docker-up: ## Start production Docker services
-	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_COMPOSE) up -d
+	docker-compose --env-file $(PRODUCTION_ENV) -f $(INFRA_COMPOSE) up -d
 
 docker-down: ## Stop production Docker services
-	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_COMPOSE) down
+	docker-compose --env-file $(PRODUCTION_ENV) -f $(INFRA_COMPOSE) down
 
 docker-logs: ## View production Docker services logs
-	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_COMPOSE) logs -f
+	docker-compose --env-file $(PRODUCTION_ENV) -f $(INFRA_COMPOSE) logs -f
 
 docker-restart: ## Restart production Docker services
-	docker-compose --env-file $(BACKEND_ENV) -f $(INFRA_COMPOSE) restart
+	docker-compose --env-file $(PRODUCTION_ENV) -f $(INFRA_COMPOSE) restart
 
 migration-create: ## Create a new migration (usage: make migration-create MESSAGE="migration message")
 	@if [ -z "$(MESSAGE)" ]; then \
