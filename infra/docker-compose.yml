@@ -1,9 +1,11 @@
 services:
-  pydantic-ai:
-    container_name: pydantic-ai
+  point-source:
+    container_name: point-source
     build:
       context: ..
       dockerfile: backend/Dockerfile
+    volumes:
+      - ../frontend/dist:/frontend/dist:ro
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
@@ -17,8 +19,25 @@ services:
       - monitoring
     restart: unless-stopped
     environment:
-      LITELLM_BASE_URL: "http://litellm:4000"
+      ENVIRONMENT: "${ENVIRONMENT:-production}"
+      LOGFIRE_TOKEN: "${LOGFIRE_TOKEN:?LOGFIRE_TOKEN is required}"
+      LOGFIRE_ENVIRONMENT: "${LOGFIRE_ENVIRONMENT:-production}"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:?ALLOWED_ORIGINS is required}"
+      DATABASE_USER: "${DATABASE_USER:?DATABASE_USER is required}"
+      DATABASE_PASSWORD: "${DATABASE_PASSWORD:?DATABASE_PASSWORD is required}"
+      DATABASE_HOST: "postgres"
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: "${DATABASE_NAME:?DATABASE_NAME is required}"
       REDIS_HOST: "redis"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
+      LITELLM_BASE_URL: "http://litellm:4000"
+      LITELLM_API_KEY: "${LITELLM_API_KEY:-}"
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}"
+      JWT_ALGORITHM: "${JWT_ALGORITHM:-HS256}"
+      JWT_ISSUER: "${JWT_ISSUER:-point-source}"
+      JWT_AUDIENCE: "${JWT_AUDIENCE:-point-source}"
+      ACCESS_TOKEN_EXPIRE_MINUTES: "${ACCESS_TOKEN_EXPIRE_MINUTES:-30}"
+      DEBUG: "${DEBUG:-false}"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health/"]
       interval: 10s
@@ -43,13 +62,13 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${DATABASE_USER:-postgres}:${DATABASE_PASSWORD:-postgres}@postgres:5432/${DATABASE_NAME:-point_source_db}
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      DATABASE_URL: postgresql://${DATABASE_USER:?DATABASE_USER is required}:${DATABASE_PASSWORD:?DATABASE_PASSWORD is required}@postgres:5432/${DATABASE_NAME:?DATABASE_NAME is required}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
       STORE_MODEL_IN_DB: "True"
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-admin-key}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY is required}
       NO_DOCS: "True"
-      UI_USERNAME: "${LITELLM_UI_USERNAME:-admin}"
-      UI_PASSWORD: "${LITELLM_UI_PASSWORD:-password}"
+      UI_USERNAME: "${LITELLM_UI_USERNAME:?LITELLM_UI_USERNAME is required}"
+      UI_PASSWORD: "${LITELLM_UI_PASSWORD:?LITELLM_UI_PASSWORD is required}"
 
   ollama:
     container_name: ollama
@@ -128,9 +147,9 @@ services:
         "maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-10GB}",
       ]
     environment:
-      POSTGRES_USER: ${DATABASE_USER:-postgres}
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-postgres}
-      POSTGRES_DB: ${DATABASE_NAME:-point_source_db}
+      POSTGRES_USER: ${DATABASE_USER:?DATABASE_USER is required}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD is required}
+      POSTGRES_DB: ${DATABASE_NAME:?DATABASE_NAME is required}
     expose:
       - "5432"
     volumes:
@@ -147,7 +166,7 @@ services:
   redis:
     container_name: redis
     image: redis:7-alpine
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
     expose:
       - "6379"
     volumes:
@@ -156,7 +175,7 @@ services:
       - database
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
