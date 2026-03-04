@@ -181,6 +181,8 @@ pytest-coverage.txt
 # Custom
 .coveragerc
 .env.local
+.env.production
+.env.development
 .pre-commit-config.yaml
 assets
 LICENSE
