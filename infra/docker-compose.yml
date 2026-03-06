@@ -13,7 +13,6 @@ services:
     networks:
       - database
       - litellm-net
-      - monitoring
     restart: unless-stopped
     environment:
       ENVIRONMENT: "${ENVIRONMENT:-production}"
@@ -77,62 +76,6 @@ services:
       - ollama_data:/root/.ollama
     networks:
       - litellm-net
-  grafana:
-    container_name: grafana
-    image: grafana/grafana:latest
-    ports:
-      - "${GRAFANA_PORT:-3000}:3000"
-    volumes:
-      - grafana-storage:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-    networks:
-      - monitoring
-    restart: always
-    depends_on:
-      prometheus:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
-  prometheus:
-    container_name: prometheus
-    image: prom/prometheus:latest
-    expose:
-      - "9090"
-    volumes:
-      - prometheus-storage:/prometheus
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=30d'
-      - '--web.enable-lifecycle'
-    networks:
-      - monitoring
-    restart: always
-    depends_on:
-      docker-exporter:
-        condition: service_started
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
-  docker-exporter:
-    container_name: docker-exporter
-    image: wywywywy/docker_stats_exporter:latest
-    expose:
-      - "9487"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - monitoring
-    restart: always
-
   postgres:
     container_name: postgres
     image: timescale/timescaledb-ha:pg17
@@ -179,13 +122,10 @@ services:
 
 volumes:
   ollama_data:
-  grafana-storage:
-  prometheus-storage:
   postgres-data:
   pgadmin-data:
   redis-data:
 
 networks:
   litellm-net:
-  monitoring:
   database:
