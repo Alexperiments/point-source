@@ -12,8 +12,44 @@ env:
   REGISTRY: docker.io
 
 jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v1
+        with:
+          enable-cache: true
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync --all-groups
+
+      - name: Load environment variables
+        working-directory: backend
+        run: |
+          set -a
+          source ci.env
+          set +a
+          env | grep -E '^(ENVIRONMENT|LOGFIRE_TOKEN|DATABASE_|REDIS_|JWT_|LITELLM_|DEBUG|ACCESS_TOKEN_|ALLOWED_ORIGINS)' >> $GITHUB_ENV
+
+      - name: Run tests
+        working-directory: backend
+        run: uv run nox -s test
+
   build-and-publish:
     name: Build and Publish Image
+    needs: test
     runs-on: ubuntu-latest
 
     steps:
