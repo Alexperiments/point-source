@@ -1,11 +1,8 @@
 services:
   point-source:
     container_name: point-source
-    build:
-      context: ..
-      dockerfile: backend/Dockerfile
-    volumes:
-      - ../frontend/dist:/frontend/dist:ro
+    image: "${POINT_SOURCE_IMAGE:-alexperiments/point-source:latest}"
+    pull_policy: always
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
