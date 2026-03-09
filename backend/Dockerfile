@@ -1,16 +1,5 @@
 # syntax=docker/dockerfile:1
 
-# Build frontend assets
-FROM node:20-alpine AS frontend-builder
-WORKDIR /frontend
-
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
-
-COPY frontend/ ./
-RUN npm run build
-
-# Build backend runtime image
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -31,10 +20,9 @@ COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv pip install --system -r pyproject.toml
 
 COPY backend/ ./
-COPY --from=frontend-builder /frontend/dist /frontend/dist
 
 RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app /frontend
+    chown -R appuser:appuser /app
 
 USER appuser
 

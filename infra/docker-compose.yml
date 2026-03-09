@@ -1,39 +1,62 @@
 services:
+  nginx:
+    container_name: point-source-nginx
+    build:
+      context: ..
+      dockerfile: infra/nginx/Dockerfile
+    depends_on:
+      point-source:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      app:
+        ipv4_address: 172.31.0.2
+    restart: unless-stopped
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/nginx-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  certbot:
+    container_name: point-source-certbot
+    image: certbot/certbot:latest
+    networks:
+      - app
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    command:
+      [
+        "/bin/sh",
+        "-c",
+        "while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h; done",
+      ]
+    restart: unless-stopped
+
   point-source:
     container_name: point-source
-    image: "${POINT_SOURCE_IMAGE:-alexperiments/point-source:latest}"
-    pull_policy: always
-    ports:
-      - "${API_PORT:-8000}:8000"
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     networks:
-      - database
-      - litellm-net
+      app:
+        ipv4_address: 172.31.0.3
+      database:
+      litellm-net:
     restart: unless-stopped
-    environment:
-      ENVIRONMENT: "${ENVIRONMENT:-production}"
-      LOGFIRE_TOKEN: "${LOGFIRE_TOKEN:?LOGFIRE_TOKEN is required}"
-      LOGFIRE_ENVIRONMENT: "${LOGFIRE_ENVIRONMENT:-production}"
-      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:?ALLOWED_ORIGINS is required}"
-      DATABASE_USER: "${DATABASE_USER:?DATABASE_USER is required}"
-      DATABASE_PASSWORD: "${DATABASE_PASSWORD:?DATABASE_PASSWORD is required}"
-      DATABASE_HOST: "postgres"
-      DATABASE_PORT: "5432"
-      DATABASE_NAME: "${DATABASE_NAME:?DATABASE_NAME is required}"
-      REDIS_HOST: "redis"
-      REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
-      LITELLM_BASE_URL: "http://litellm:4000"
-      LITELLM_API_KEY: "${LITELLM_API_KEY:-}"
-      JWT_SECRET_KEY: "${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}"
-      JWT_ALGORITHM: "${JWT_ALGORITHM:-HS256}"
-      JWT_ISSUER: "${JWT_ISSUER:-point-source}"
-      JWT_AUDIENCE: "${JWT_AUDIENCE:-point-source}"
-      ACCESS_TOKEN_EXPIRE_MINUTES: "${ACCESS_TOKEN_EXPIRE_MINUTES:-30}"
-      DEBUG: "${DEBUG:-false}"
+    env_file:
+      - ../backend/.env.production
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health/"]
       interval: 10s
@@ -47,8 +70,8 @@ services:
       - ./litellm/litellm.yaml:/app/litellm/litellm.yaml
     command: [ "--config", "/app/litellm/litellm.yaml", "--port", "4000" ]
     restart: unless-stopped
-    ports:
-      - "4000:4000"
+    expose:
+      - "4000"
     networks:
       - litellm-net
       - database
@@ -66,34 +89,22 @@ services:
       UI_USERNAME: "${LITELLM_UI_USERNAME:?LITELLM_UI_USERNAME is required}"
       UI_PASSWORD: "${LITELLM_UI_PASSWORD:?LITELLM_UI_PASSWORD is required}"
 
-  ollama:
-    container_name: ollama
-    image: "ollama/ollama"
-    command: ["serve"]
-    expose:
-      - "11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    networks:
-      - litellm-net
   postgres:
     container_name: postgres
     image: timescale/timescaledb-ha:pg17
-    shm_size: ${POSTGRES_SHM_SIZE:-12gb}
     command:
       [
         "postgres",
         "-c",
-        "maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-10GB}",
+        "config_file=${DATABASE_CONFIG_PATH:-/home/postgres/pgdata/data/postgresql.conf}",
       ]
     environment:
       POSTGRES_USER: ${DATABASE_USER:?DATABASE_USER is required}
       POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD is required}
       POSTGRES_DB: ${DATABASE_NAME:?DATABASE_NAME is required}
-    expose:
-      - "5432"
     volumes:
       - postgres-data:/home/postgres/pgdata/data
+      - ${DATABASE_CONFIG_DIR:-./postgres}:/etc/postgresql/custom:ro
     networks:
       - database
     restart: unless-stopped
@@ -102,7 +113,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
   redis:
     container_name: redis
     image: redis:7-alpine
@@ -121,11 +131,17 @@ services:
       retries: 5
 
 volumes:
-  ollama_data:
+  certbot-www:
+  letsencrypt:
   postgres-data:
   pgadmin-data:
   redis-data:
 
 networks:
+  app:
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
   litellm-net:
   database:
+    internal: true
