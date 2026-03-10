@@ -6,14 +6,9 @@ import logfire
 from sqlalchemy import select, update
 
 from src.core.database.base import async_session
-from src.core.telemetry import configure_logfire
 from src.models.node import TextNode
 from src.services.embedding_service import EmbeddingService
 
-
-configure_logfire()
-logfire.instrument_sqlalchemy()
-logfire.instrument_pydantic_ai()
 
 SLEEP_SECONDS_BETWEEN_BATCHES = 0
 BATCH_SIZE = 2048
