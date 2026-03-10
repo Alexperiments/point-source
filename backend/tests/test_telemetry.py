@@ -11,7 +11,7 @@ import src.core.telemetry as telemetry
 class TestConfigureLogfire:
     """Tests for configure_logfire."""
 
-    def test_configures_logfire_with_settings_token(self, monkeypatch) -> None:
+    def test_configures_logfire_from_project_settings(self, monkeypatch) -> None:
         configure = MagicMock()
 
         monkeypatch.setattr(telemetry.logfire, "configure", configure)
@@ -20,7 +20,6 @@ class TestConfigureLogfire:
             "settings",
             SimpleNamespace(
                 logfire_token=SecretStr("  test-token  "),
-                logfire_send_to_logfire="if-token-present",
                 environment="production",
             ),
         )
@@ -28,55 +27,8 @@ class TestConfigureLogfire:
         telemetry.configure_logfire()
 
         configure.assert_called_once_with(
-            service_name=telemetry.PROJECT_INFO["name"],
-            service_version=telemetry.PROJECT_INFO["version"],
-            environment="production",
-            send_to_logfire="if-token-present",
             token="test-token",
-        )
-
-    def test_skips_token_when_blank(self, monkeypatch) -> None:
-        configure = MagicMock()
-
-        monkeypatch.setattr(telemetry.logfire, "configure", configure)
-        monkeypatch.setattr(
-            telemetry,
-            "settings",
-            SimpleNamespace(
-                logfire_token=SecretStr("   "),
-                logfire_send_to_logfire="if-token-present",
-                environment="development",
-            ),
-        )
-
-        telemetry.configure_logfire()
-
-        configure.assert_called_once_with(
-            service_name=telemetry.PROJECT_INFO["name"],
-            service_version=telemetry.PROJECT_INFO["version"],
-            environment="development",
-            send_to_logfire="if-token-present",
-        )
-
-    def test_disables_logfire_export_when_configured(self, monkeypatch) -> None:
-        configure = MagicMock()
-
-        monkeypatch.setattr(telemetry.logfire, "configure", configure)
-        monkeypatch.setattr(
-            telemetry,
-            "settings",
-            SimpleNamespace(
-                logfire_token=SecretStr("test-token"),
-                logfire_send_to_logfire=False,
-                environment="production",
-            ),
-        )
-
-        telemetry.configure_logfire()
-
-        configure.assert_called_once_with(
             service_name=telemetry.PROJECT_INFO["name"],
             service_version=telemetry.PROJECT_INFO["version"],
             environment="production",
-            send_to_logfire=False,
         )
