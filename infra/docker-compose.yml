@@ -103,8 +103,8 @@ services:
       POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD is required}
       POSTGRES_DB: ${DATABASE_NAME:?DATABASE_NAME is required}
     volumes:
-      - ${DATABASE_VOLUME_PATH:-./postgres-data}:/home/postgres/pgdata/data
-      - ${DATABASE_CONFIG_DIR:-./postgres}:/etc/postgresql/custom:ro
+      - ${DATABASE_VOLUME_PATH:?DATABASE_VOLUME_PATH is required}:/home/postgres/pgdata/data
+      - ${DATABASE_CONFIG_DIR:?DATABASE_CONFIG_DIR is required}:/etc/postgresql/custom:ro
     networks:
       - database
     restart: unless-stopped
