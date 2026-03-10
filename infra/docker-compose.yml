@@ -149,3 +149,6 @@ networks:
   litellm-net:
   database:
     internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
