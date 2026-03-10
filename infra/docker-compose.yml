@@ -106,7 +106,11 @@ services:
       - ${DATABASE_VOLUME_PATH:-/srv/postgres/data}:/home/postgres/pgdata/data
       - ${DATABASE_CONFIG_DIR:-/srv/postgres/config}:/etc/postgresql/custom:ro
     networks:
-      - database
+      database:
+        internal: true
+        ipam:
+          config:
+            - subnet: 172.30.0.0/24
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-postgres}"]
