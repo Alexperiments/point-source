@@ -6,11 +6,12 @@ import logfire
 from sqlalchemy import select
 
 from src.core.database.base import async_session
+from src.core.telemetry import configure_logfire
 from src.models.node import DocumentNode
 from src.services.chunking_service import MarkdownChunker
 
 
-logfire.configure()
+configure_logfire()
 
 
 async def main() -> None:

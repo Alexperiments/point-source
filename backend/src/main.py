@@ -14,6 +14,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from src.admin import admin
 from src.api import router
 from src.core.config import PROJECT_INFO, settings
+from src.core.telemetry import configure_logfire
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -58,10 +59,7 @@ app = FastAPI(
 
 SecurityMiddleware.configure_cors(app, config)
 
-logfire.configure(
-    service_name=PROJECT_INFO["name"],
-    service_version=PROJECT_INFO["version"],
-)
+configure_logfire()
 logfire.instrument_pydantic_ai()
 logfire.instrument_fastapi(app)
 

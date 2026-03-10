@@ -12,15 +12,12 @@ from src.core.agentic_system.agents.main_agent import (
     MainAgentDependencies,
     get_main_agent,
 )
-from src.core.config import PROJECT_INFO
 from src.core.database.base import get_async_session
 from src.core.database.redis import get_redis_pool
+from src.core.telemetry import configure_logfire
 
 
-logfire.configure(
-    service_name=PROJECT_INFO["name"],
-    service_version=PROJECT_INFO["version"],
-)
+configure_logfire()
 logfire.instrument_pydantic_ai()
 MAIN_AGENT = get_main_agent()
 
