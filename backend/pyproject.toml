@@ -24,7 +24,6 @@ dependencies = [
     "pgvector>=0.4.2",
     "logfire[fastapi,litellm,redis,sqlalchemy]>=4.19.0",
     "litellm>=1.81.9",
-    "sentence-transformers>=5.2.2",
 ]
 
 [dependency-groups]
@@ -40,6 +39,7 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=7.0.0",
     "ruff>=0.14.0",
+    "sentence-transformers>=5.2.2",
     "types-python-jose>=3.5.0.20250531",
     "pydantic-evals[logfire]>=1.16.0",
     "transformers>=4.57.6",
