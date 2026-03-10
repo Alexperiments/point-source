@@ -20,6 +20,7 @@ class TestConfigureLogfire:
             "settings",
             SimpleNamespace(
                 logfire_token=SecretStr("  test-token  "),
+                logfire_send_to_logfire=False,
                 environment="production",
             ),
         )
@@ -27,6 +28,7 @@ class TestConfigureLogfire:
         telemetry.configure_logfire()
 
         configure.assert_called_once_with(
+            send_to_logfire=False,
             token="test-token",
             service_name=telemetry.PROJECT_INFO["name"],
             service_version=telemetry.PROJECT_INFO["version"],

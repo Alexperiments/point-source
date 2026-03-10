@@ -67,12 +67,13 @@ class TestSettings:
             },
             clear=False,
         ):
-            settings = Settings()
+            settings = Settings(_env_file=None)
             assert settings.jwt_algorithm == "HS256"
             assert settings.debug is False
             assert settings.access_token_expire_minutes == 30
             assert settings.redis_host == "localhost"
             assert settings.allowed_origins == "*"
+            assert settings.logfire_send_to_logfire == "if-token-present"
 
     def test_jwt_secret_key_default_factory(self) -> None:
         """Test that JWT secret key is generated if not provided."""
@@ -302,6 +303,7 @@ class TestSettings:
         ):
             settings = Settings()
             assert settings.logfire_token.get_secret_value() == "custom_token"
+            assert settings.logfire_send_to_logfire == "if-token-present"
             assert settings.database_user == "custom_user"
             assert settings.database_password.get_secret_value() == "custom_pass"
             assert settings.database_host == "custom_host"
@@ -312,6 +314,25 @@ class TestSettings:
             assert settings.jwt_algorithm == "HS512"
             assert settings.debug is True
             assert settings.access_token_expire_minutes == 60
+
+    def test_logfire_can_be_disabled_without_token(self) -> None:
+        """Test that Logfire can be disabled without requiring a token."""
+        with patch.dict(
+            os.environ,
+            {
+                "LOGFIRE_SEND_TO_LOGFIRE": "false",
+                "DATABASE_USER": "test_user",
+                "DATABASE_PASSWORD": "test_pass",
+                "DATABASE_HOST": "localhost",
+                "DATABASE_PORT": "5432",
+                "DATABASE_NAME": "test_db",
+                "REDIS_PASSWORD": "redis_pass",
+            },
+            clear=True,
+        ):
+            settings = Settings(_env_file=None)
+            assert settings.logfire_token.get_secret_value() == ""
+            assert settings.logfire_send_to_logfire is False
 
     def test_required_fields_missing(self) -> None:
         """Test that missing required fields raise ValidationError."""
