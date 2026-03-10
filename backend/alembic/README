@@ -12,5 +12,8 @@ After autogeneration it is highly recommended to check new revision in /versions
 ### Upgrade the DB to the newest revision
 >alembic upgrade head
 
+The history is squashed into the single head revision `7e4a1f2c9b61`.
+Databases already at that revision can continue unchanged; older databases need to reach that head before switching to the squashed history.
+
 ### Downgrade DB to previous revision
 >alembic downgrade -1
