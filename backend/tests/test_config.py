@@ -281,6 +281,25 @@ class TestSettings:
             assert len(origins) == 2
             assert "" not in origins
 
+    def test_logfire_send_to_logfire_can_be_disabled(self) -> None:
+        """Test that Logfire export can be disabled from env."""
+        with patch.dict(
+            os.environ,
+            {
+                "LOGFIRE_TOKEN": "test_token",
+                "LOGFIRE_SEND_TO_LOGFIRE": "false",
+                "DATABASE_USER": "test_user",
+                "DATABASE_PASSWORD": "test_pass",
+                "DATABASE_HOST": "localhost",
+                "DATABASE_PORT": "5432",
+                "DATABASE_NAME": "test_db",
+                "REDIS_PASSWORD": "redis_pass",
+            },
+            clear=False,
+        ):
+            settings = Settings()
+            assert settings.logfire_send_to_logfire is False
+
     def test_environment_variable_loading(self) -> None:
         """Test that environment variables are loaded correctly."""
         with patch.dict(

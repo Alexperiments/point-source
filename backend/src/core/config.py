@@ -4,7 +4,7 @@ import os
 import secrets
 import tomllib
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import Literal, TypedDict, cast
 
 from jwt.algorithms import get_default_algorithms
 from pydantic import (
@@ -74,6 +74,9 @@ class Settings(BaseSettings):
 
     environment: str = Field(default=CURRENT_ENV)
     logfire_token: SecretStr
+    logfire_send_to_logfire: bool | Literal["if-token-present"] = Field(
+        default="if-token-present",
+    )
     allowed_origins: str = Field(default="*")
 
     database_user: str
