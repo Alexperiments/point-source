@@ -105,7 +105,7 @@ services:
       POSTGRES_DB: ${DATABASE_NAME:?DATABASE_NAME is required}
     volumes:
       - ${DATABASE_VOLUME_PATH:-/srv/postgres/data}:/home/postgres/pgdata/data
-      - ${DATABASE_CONFIG_DIR:-/srv/postgres/config}:/etc/postgresql/custom:ro
+      - ${DATABASE_CONFIG_FILE:-./postgres/postgresql_small.conf}:/etc/postgresql/custom/postgresql.conf:ro
     networks:
       - database
     restart: unless-stopped
