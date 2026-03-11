@@ -17,10 +17,10 @@ from src.services.embedding_service import EmbeddingService
 SLEEP_SECONDS_BETWEEN_BATCHES = float(
     os.getenv("TEXT_EMBEDDING_SLEEP_SECONDS", "0"),
 )
-DATABASE_BATCH_SIZE = int(os.getenv("TEXT_EMBEDDING_DB_BATCH_SIZE", "2048"))
+DATABASE_BATCH_SIZE = int(os.getenv("TEXT_EMBEDDING_DB_BATCH_SIZE", "1024"))
 API_BATCH_SIZE = int(os.getenv("TEXT_EMBEDDING_API_BATCH_SIZE", "64"))
 API_MAX_CONCURRENCY = int(
-    os.getenv("TEXT_EMBEDDING_API_MAX_CONCURRENCY", "32"),
+    os.getenv("TEXT_EMBEDDING_API_MAX_CONCURRENCY", "16"),
 )
 
 configure_logfire()
