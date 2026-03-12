@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-CERT_DIR="/etc/letsencrypt/live/www.point-sources.com"
+CERT_DIR="/etc/letsencrypt/live/www.point-source.org"
 FULLCHAIN="$CERT_DIR/fullchain.pem"
 PRIVKEY="$CERT_DIR/privkey.pem"
 
@@ -10,7 +10,7 @@ if [ ! -s "$FULLCHAIN" ] || [ ! -s "$PRIVKEY" ]; then
   openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
     -keyout "$PRIVKEY" \
     -out "$FULLCHAIN" \
-    -subj "/CN=www.point-sources.com"
+    -subj "/CN=www.point-source.org"
 fi
 
 exec nginx -g "daemon off;"
