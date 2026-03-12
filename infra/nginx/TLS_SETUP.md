@@ -46,8 +46,6 @@ docker compose -f infra/docker-compose.yml exec nginx nginx -s reload
 
 ## 6. Renewal
 
-The `certbot` service runs `certbot renew` every 12 hours. After a renewal, reload `nginx`:
+The `certbot` service runs `certbot renew` every 12 hours. When a certificate is renewed, it touches a shared flag file and the `nginx` container automatically reloads within about 60 seconds.
 
-```bash
-docker compose -f infra/docker-compose.yml exec nginx nginx -s reload
-```
+You do not need a host-level cron job for certificate renewal with this setup.

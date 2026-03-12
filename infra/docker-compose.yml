@@ -31,12 +31,8 @@ services:
     volumes:
       - letsencrypt:/etc/letsencrypt
       - certbot-www:/var/www/certbot
-    command:
-      [
-        "/bin/sh",
-        "-c",
-        "while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h; done",
-      ]
+      - ./certbot/renew.sh:/usr/local/bin/renew.sh:ro
+    command: ["/bin/sh", "/usr/local/bin/renew.sh"]
     restart: unless-stopped
 
   point-source:
