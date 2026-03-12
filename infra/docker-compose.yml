@@ -93,6 +93,7 @@ services:
   postgres:
     container_name: postgres
     image: timescale/timescaledb-ha:pg17
+    shm_size: ${POSTGRES_SHM_SIZE:-1gb}
     command:
       [
         "postgres",
