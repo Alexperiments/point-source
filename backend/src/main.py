@@ -55,6 +55,9 @@ app = FastAPI(
     version=PROJECT_INFO["version"],
     description=PROJECT_INFO["description"],
     lifespan=lifespan,
+    docs_url=None if settings.environment == "production" else "/docs",
+    redoc_url=None if settings.environment == "production" else "/redoc",
+    openapi_url=None if settings.environment == "production" else "/openapi.json",
 )
 
 SecurityMiddleware.configure_cors(app, config)
