@@ -105,6 +105,9 @@ services:
     volumes:
       - ${DATABASE_VOLUME_PATH:-/srv/postgres/data}:/home/postgres/pgdata/data
       - ${DATABASE_CONFIG_FILE:-./postgres/postgresql_small.conf}:/etc/postgresql/custom/postgresql.conf:ro
+      - /usr/local/bin/wal-g:/usr/local/bin/wal-g:ro
+      - /usr/bin/envdir:/usr/bin/envdir:ro
+      - /etc/wal-g.d/env:/etc/wal-g.d/env:ro
     networks:
       - database
     restart: unless-stopped
