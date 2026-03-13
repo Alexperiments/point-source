@@ -13,22 +13,24 @@ It lets you chat with papers and get grounded, citation-oriented answers from a 
 > - Coverage is not exhaustive.
 > - Some relevant papers are excluded because they fail parsing/quality filters.
 
-
-## Stack
-
-- Frontend: React, TypeScript, Vite, Tailwind CSS
-- Backend: FastAPI, Pydantic AI, LiteLLM
-- Data: PostgreSQL + pgvector, Redis
-
 ## Development (Quick Start)
 
 ### Prerequisites
 
 - Docker + Docker Compose
-- Node.js 20+
+- Node.js 20+ and npm
 - Python 3.12 + `uv`
 
-### 1. Configure environment
+### 1. Install dependencies
+
+```bash
+make install-dev
+
+cd frontend
+npm ci
+```
+
+### 2. Configure environment
 
 - Backend env file is `backend/.env.development`
 - Frontend env file:
@@ -44,25 +46,35 @@ If you run the frontend with Vite (`npm run dev`), set:
 VITE_API_BASE_URL="http://localhost:8000"
 ```
 
-### 2. Build frontend assets (for backend-served UI)
-
-```bash
-cd frontend
-npm ci
-npm run build
-```
-
-### 3. Start the development stack
-
-From repo root:
+### 3. Start supporting services
 
 ```bash
 make docker-dev-up
 ```
 
+### 4. Start the backend
+
+```bash
+make run-dev
+```
+
+### 5. Start the frontend
+
+```bash
+cd frontend
+npm run dev
+```
+
 Open:
 
-- App: `http://127.0.0.1:8000`
+- Frontend app: `http://127.0.0.1:8080`
+- Backend API docs: `http://127.0.0.1:8000/docs`
+
+To stop the supporting services:
+
+```bash
+make docker-dev-down
+```
 
 
 ## Contributing
