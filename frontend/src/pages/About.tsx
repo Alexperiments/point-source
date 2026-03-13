@@ -31,7 +31,7 @@ const About = () => {
           <h2 className="text-xs uppercase tracking-wide text-muted-foreground pt-4">About version alpha</h2>
           <p className="text-foreground/70">
             PointSource is currently in alpha. The papers available to the system are a curated subset of
-            arXiv rather than the full corpus: specifically, papers in the <code>astro-ph</code> category from
+            arXiv rather than the full corpus: specifically, 81756 papers in the <code>astro-ph</code> category from
             the{" "}
             <a
               href="https://ar5iv.labs.arxiv.org/"
