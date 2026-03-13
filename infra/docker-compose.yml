@@ -66,6 +66,8 @@ services:
       - ./litellm/litellm.yaml:/app/litellm/litellm.yaml
     command: [ "--config", "/app/litellm/litellm.yaml", "--port", "4000" ]
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:4000:4000"
     expose:
       - "4000"
     networks:
