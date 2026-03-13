@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Check, Copy, RotateCcw, Send, Telescope } from "lucide-react";
+import { Check, Copy, Menu, RotateCcw, Send, Telescope } from "lucide-react";
 import type { Conversation, AgentStatus } from "@/pages/Index";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -13,6 +13,7 @@ interface Props {
   onSend: (content: string) => void;
   onRetry: (assistantMessageId: string) => void;
   agentStatus: AgentStatus;
+  onOpenSidebar: () => void;
 }
 
 const normalizeAssistantMarkdown = (content: string): string => {
@@ -60,7 +61,7 @@ const normalizeAssistantMarkdown = (content: string): string => {
   return lines.join("\n");
 };
 
-const ChatArea = ({ conversation, onSend, onRetry, agentStatus }: Props) => {
+const ChatArea = ({ conversation, onSend, onRetry, agentStatus, onOpenSidebar }: Props) => {
   const [input, setInput] = useState("");
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -92,6 +93,7 @@ const ChatArea = ({ conversation, onSend, onRetry, agentStatus }: Props) => {
 
   const messages = conversation?.messages ?? [];
   const lastAssistantMessageId = [...messages].reverse().find((m) => m.role === "assistant")?.id;
+  const mobileTitle = conversation?.title || "Point-source";
 
   const handleCopy = async (messageId: string, content: string) => {
     if (!navigator.clipboard) {
@@ -112,10 +114,31 @@ const ChatArea = ({ conversation, onSend, onRetry, agentStatus }: Props) => {
 
   return (
     <div className="flex flex-1 flex-col min-w-0">
+      <div
+        className="shrink-0 border-b border-border bg-background/95 backdrop-blur md:hidden"
+        style={{ paddingTop: "env(safe-area-inset-top)" }}
+      >
+        <div className="flex h-14 items-center gap-3 px-4">
+          <button
+            onClick={onOpenSidebar}
+            className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent"
+            aria-label="Open chat sidebar"
+          >
+            <Menu size={18} />
+          </button>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-foreground">{mobileTitle}</p>
+            <p className="truncate text-[11px] text-muted-foreground">
+              {messages.length === 0 ? "New conversation" : `${messages.length} messages`}
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
         {messages.length === 0 && agentStatus === "idle" ? (
-          <div className="flex h-full items-center justify-center">
+          <div className="flex h-full items-center justify-center px-4 py-8">
             <div className="text-center space-y-3 px-4">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-accent">
                 <Telescope size={22} className="text-primary/70" />
@@ -127,11 +150,11 @@ const ChatArea = ({ conversation, onSend, onRetry, agentStatus }: Props) => {
             </div>
           </div>
         ) : (
-          <div className="mx-auto max-w-2xl px-4 py-6 space-y-6">
+          <div className="mx-auto w-full max-w-2xl space-y-5 px-3 py-4 sm:px-4 sm:py-6">
             {messages.map((msg) => (
-              <div key={msg.id} className="flex gap-3">
+              <div key={msg.id} className="flex gap-2.5 sm:gap-3">
                 <div
-                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium
+                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-medium sm:h-7 sm:w-7 sm:text-xs
                     ${msg.role === "user"
                       ? "bg-primary text-primary-foreground"
                       : "bg-accent text-accent-foreground"
@@ -145,7 +168,7 @@ const ChatArea = ({ conversation, onSend, onRetry, agentStatus }: Props) => {
                   </p>
                   {msg.role === "assistant" ? (
                     <div>
-                      <div className="max-w-none font-sans text-[15px] leading-7 text-foreground [&_p]:my-0 [&_p+*]:mt-4 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_strong]:font-semibold [&_h1]:my-4 [&_h1]:text-[15px] [&_h1]:font-semibold [&_h2]:my-4 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:my-4 [&_h3]:text-[15px] [&_h3]:font-semibold [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-accent [&_pre]:p-3 [&_pre]:text-accent-foreground [&_code]:rounded [&_code]:bg-accent [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.9em] [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2">
+                      <div className="max-w-none font-sans text-[14px] leading-6 text-foreground sm:text-[15px] sm:leading-7 [&_p]:my-0 [&_p+*]:mt-4 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_strong]:font-semibold [&_h1]:my-4 [&_h1]:text-[15px] [&_h1]:font-semibold [&_h2]:my-4 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h3]:my-4 [&_h3]:text-[15px] [&_h3]:font-semibold [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-accent [&_pre]:p-3 [&_pre]:text-accent-foreground [&_code]:rounded [&_code]:bg-accent [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.9em] [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2">
                         <ReactMarkdown
                           remarkPlugins={[remarkMath]}
                           rehypePlugins={[rehypeKatex]}
@@ -181,7 +204,7 @@ const ChatArea = ({ conversation, onSend, onRetry, agentStatus }: Props) => {
                       </div>
                     </div>
                   ) : (
-                    <div className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">
+                    <div className="whitespace-pre-wrap text-sm leading-6 text-foreground">
                       {msg.content}
                     </div>
                   )}
@@ -197,9 +220,12 @@ const ChatArea = ({ conversation, onSend, onRetry, agentStatus }: Props) => {
       </div>
 
       {/* Input area */}
-      <div className="border-t border-border px-4 py-3">
+      <div
+        className="border-t border-border px-3 py-3 sm:px-4"
+        style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.75rem)" }}
+      >
         <div className="mx-auto max-w-2xl">
-          <div className="flex items-end gap-2 rounded-xl border border-input bg-card p-2 shadow-sm focus-within:ring-1 focus-within:ring-ring transition-shadow">
+          <div className="flex items-end gap-2 rounded-xl border border-input bg-card p-2 shadow-sm transition-shadow focus-within:ring-1 focus-within:ring-ring">
             <textarea
               ref={textareaRef}
               value={input}
@@ -207,12 +233,12 @@ const ChatArea = ({ conversation, onSend, onRetry, agentStatus }: Props) => {
               onKeyDown={handleKeyDown}
               placeholder="Message..."
               rows={1}
-              className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+              className="flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-foreground placeholder:text-muted-foreground focus:outline-none sm:text-sm"
             />
             <button
               onClick={handleSubmit}
               disabled={!input.trim() || agentStatus !== "idle"}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground disabled:opacity-30 hover:opacity-90 transition-opacity"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-30 sm:h-8 sm:w-8"
             >
               <Send size={15} />
             </button>

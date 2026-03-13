@@ -122,21 +122,27 @@ const ChatSidebar = ({
       {/* Overlay for mobile */}
       {open && (
         <div
-          className="fixed inset-0 z-40 bg-black/20 md:hidden"
+          className="fixed inset-0 z-40 bg-black/35 md:hidden"
           onClick={onClose}
         />
       )}
 
       <aside
         className={`
-          fixed md:relative z-50 h-full flex flex-col
+          fixed inset-y-0 left-0 z-50 flex h-full flex-col
           bg-sidebar-background border-r border-sidebar-border
-          transition-all duration-200 ease-in-out
-          ${open ? "w-64 translate-x-0" : "w-0 -translate-x-full md:translate-x-0"}
+          shadow-xl transition-transform duration-200 ease-in-out md:relative md:shadow-none
+          ${open ? "w-64 translate-x-0" : "w-64 -translate-x-full md:translate-x-0"}
         `}
       >
         {!open ? null : (
-          <div className="flex h-full w-64 flex-col">
+          <div
+            className="flex h-full w-64 max-w-[85vw] flex-col"
+            style={{
+              paddingTop: "env(safe-area-inset-top)",
+              paddingBottom: "env(safe-area-inset-bottom)",
+            }}
+          >
             <div className="border-b border-sidebar-border px-3 py-3">
               <div className="flex items-center gap-2">
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/60 ring-1 ring-primary/10">
@@ -203,7 +209,7 @@ const ChatSidebar = ({
                         e.stopPropagation();
                         setConversationMenuId((prev) => (prev === conv.id ? null : conv.id));
                       }}
-                      className="opacity-0 group-hover:opacity-100 rounded p-1 hover:bg-accent transition-all"
+                      className="rounded p-1 opacity-100 transition-all hover:bg-accent md:opacity-0 md:group-hover:opacity-100"
                       aria-label="Open chat options"
                     >
                       <MoreHorizontal size={13} />

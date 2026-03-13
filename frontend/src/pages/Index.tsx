@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatArea from "@/components/ChatArea";
-import { Menu } from "lucide-react";
 import { streamChat } from "@/lib/StreamChat";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
+import { useIsMobile } from "@/hooks/use-mobile";
 import {
   createThread,
   deleteThread,
@@ -44,13 +44,21 @@ const toConversation = (thread: ThreadPayload): Conversation => ({
 
 const Index = () => {
   const { user, isLoading } = useAuth();
+  const isMobile = useIsMobile();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth >= 768 : true
+  );
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
   const [loginPromptVersion, setLoginPromptVersion] = useState(0);
 
   const activeConversation = conversations.find((c) => c.id === activeId) ?? null;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setSidebarOpen(window.innerWidth >= 768);
+  }, [isMobile]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -93,6 +101,9 @@ const Index = () => {
 
   const createConversation = () => {
     setActiveId(null);
+    if (isMobile) {
+      setSidebarOpen(false);
+    }
   };
 
   const streamAssistantReply = async ({
@@ -244,20 +255,16 @@ const Index = () => {
   };
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background">
-      {!sidebarOpen && (
-        <button
-          onClick={() => setSidebarOpen(true)}
-          className="fixed left-3 top-3 z-50 rounded-md p-2 text-muted-foreground hover:bg-accent transition-colors"
-        >
-          <Menu size={20} />
-        </button>
-      )}
-
+    <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-background">
       <ChatSidebar
         conversations={conversations}
         activeId={activeId}
-        onSelect={setActiveId}
+        onSelect={(id) => {
+          setActiveId(id);
+          if (isMobile) {
+            setSidebarOpen(false);
+          }
+        }}
         onNew={createConversation}
         onDelete={deleteConversation}
         loginPromptVersion={loginPromptVersion}
@@ -270,6 +277,7 @@ const Index = () => {
         onSend={sendMessage}
         onRetry={retryAssistantMessage}
         agentStatus={agentStatus}
+        onOpenSidebar={() => setSidebarOpen(true)}
       />
     </div>
   );
