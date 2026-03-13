@@ -1,4 +1,4 @@
-.PHONY: help install install-dev run run-dev format lint lint-fix test test-cov clean docker-up docker-down docker-logs docker-dev-up docker-dev-down docker-dev-logs docker-dev-restart migration-create migration-upgrade migration-downgrade migration-current migration-history pre-commit-install pre-commit-run createsuperuser
+.PHONY: help install install-dev run run-dev format lint lint-fix test test-cov clean docker-up docker-down docker-logs docker-dev-up docker-dev-down docker-dev-logs docker-dev-restart docker-rebuild-frontend docker-rebuild-backend migration-create migration-upgrade migration-downgrade migration-current migration-history pre-commit-install pre-commit-run createsuperuser
 
 # Default target
 .DEFAULT_GOAL := help
@@ -70,6 +70,12 @@ docker-logs: ## View production Docker services logs
 
 docker-restart: ## Restart production Docker services
 	docker compose --env-file $(PRODUCTION_ENV) -f $(INFRA_COMPOSE) restart
+
+docker-rebuild-frontend: ## Rebuild and restart the production frontend service
+	docker compose --env-file $(PRODUCTION_ENV) -f $(INFRA_COMPOSE) up -d --build --no-deps nginx
+
+docker-rebuild-backend: ## Rebuild and restart the production backend service
+	docker compose --env-file $(PRODUCTION_ENV) -f $(INFRA_COMPOSE) up -d --build --no-deps point-source
 
 migration-create: ## Create a new migration (usage: make migration-create MESSAGE="migration message")
 	@if [ -z "$(MESSAGE)" ]; then \
