@@ -53,14 +53,6 @@ const About = () => {
             </a>.
           </p>
 
-          <h2 className="text-xs uppercase tracking-wide text-muted-foreground pt-4">Tech stack</h2>
-          <ul className="list-disc pl-5 space-y-1 text-foreground/70">
-            <li>React + TypeScript frontend built with Vite and Tailwind CSS</li>
-            <li>FastAPI backend with Pydantic AI and LiteLLM model gateway</li>
-            <li>PostgreSQL + pgvector for data and vector search, with Redis for runtime services</li>
-            <li>RAG pipeline with scientific-document retrieval and streamed responses</li>
-          </ul>
-
           <h2 className="text-xs uppercase tracking-wide text-muted-foreground pt-4">Contact</h2>
           <div className="flex items-center gap-4 text-foreground/70">
             <a
