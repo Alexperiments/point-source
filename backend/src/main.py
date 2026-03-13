@@ -20,6 +20,15 @@ from src.core.telemetry import configure_logfire
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SECURITY_LOG_FILE = str(PROJECT_ROOT / "security.log")
 NGINX_PROXY_IP = "172.31.0.2"
+SECURITY_EXCLUDE_PATHS = [
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/openapi.yaml",
+    "/favicon.ico",
+    "/static",
+    "/v1/health",
+]
 
 
 @asynccontextmanager
@@ -46,6 +55,7 @@ config = SecurityConfig(
     cors_allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     cors_allow_headers=["*"],
     cors_allow_credentials=settings.environment != "development",
+    exclude_paths=SECURITY_EXCLUDE_PATHS,
     passive_mode=True,
     log_suspicious_level="WARNING",
 )
