@@ -130,7 +130,7 @@ const ChatSidebar = ({
       <aside
         className={`
           fixed inset-y-0 left-0 z-50 flex h-full flex-col
-          bg-sidebar-background border-r border-sidebar-border
+          bg-sidebar border-r border-sidebar-border
           shadow-xl transition-transform duration-200 ease-in-out md:relative md:shadow-none
           ${open ? "w-64 translate-x-0" : "w-64 -translate-x-full md:translate-x-0"}
         `}
