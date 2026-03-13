@@ -157,6 +157,13 @@ const ChatSidebar = ({
                   </p>
                 </div>
               </div>
+              <button
+                onClick={openAbout}
+                className="mt-3 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-xs font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent"
+              >
+                <CircleHelp size={13} />
+                About this project
+              </button>
             </div>
 
             {/* Header */}
@@ -287,13 +294,6 @@ const ChatSidebar = ({
                       >
                         <User size={13} />
                         Profile
-                      </button>
-                      <button
-                        onClick={openAbout}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-popover-foreground transition-colors hover:bg-accent"
-                      >
-                        <CircleHelp size={13} />
-                        About this project
                       </button>
                       <button
                         onClick={handleLogout}
