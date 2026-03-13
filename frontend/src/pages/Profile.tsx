@@ -1,10 +1,21 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Cpu, LogOut, Monitor, Moon, Save, Sun, User } from "lucide-react";
+import { ArrowLeft, Cpu, Gauge, LogOut, Monitor, Moon, Save, Sun, User } from "lucide-react";
+import { AUTH_BASE_URL } from "@/lib/api";
+import { getAccessToken } from "@/lib/authStorage";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 
 type ThemePreference = "light" | "dark" | "system";
+
+type UsageSummary = {
+  isPremium: boolean;
+  dailyMessageLimit: number | null;
+  requestsUsed: number;
+  requestsRemaining: number | null;
+  resetAt: string;
+  resetInSeconds: number;
+};
 
 const PROFILE_PREFERENCES_KEY = "point-source.profile-preferences";
 const DEFAULT_MODEL_ID = "openai/gpt-5-mini";
@@ -22,17 +33,120 @@ const themes: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
 const isThemePreference = (value: unknown): value is ThemePreference =>
   value === "light" || value === "dark" || value === "system";
 
+const parseErrorMessage = (payload: unknown): string | null => {
+  if (!payload) return null;
+  if (typeof payload === "string") return payload;
+  if (typeof payload !== "object") return null;
+
+  const asRecord = payload as Record<string, unknown>;
+  const detail = asRecord.detail;
+
+  if (typeof detail === "string") return detail;
+
+  if (Array.isArray(detail) && detail.length > 0) {
+    const firstError = detail[0];
+    if (typeof firstError === "string") return firstError;
+    if (typeof firstError === "object" && firstError !== null) {
+      const message = (firstError as Record<string, unknown>).msg;
+      if (typeof message === "string") return message;
+    }
+  }
+
+  const message = asRecord.message;
+  if (typeof message === "string") return message;
+
+  return null;
+};
+
+const parseUsageSummary = (payload: unknown): UsageSummary => {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Invalid usage payload from server.");
+  }
+
+  const raw = payload as Record<string, unknown>;
+  const isPremium = raw.is_premium;
+  const dailyMessageLimit = raw.daily_message_limit;
+  const requestsUsed = raw.requests_used;
+  const requestsRemaining = raw.requests_remaining;
+  const resetAt = raw.reset_at;
+  const resetInSeconds = raw.reset_in_seconds;
+
+  if (
+    typeof isPremium !== "boolean" ||
+    (dailyMessageLimit !== null && typeof dailyMessageLimit !== "number") ||
+    typeof requestsUsed !== "number" ||
+    (requestsRemaining !== null && typeof requestsRemaining !== "number") ||
+    typeof resetAt !== "string" ||
+    typeof resetInSeconds !== "number"
+  ) {
+    throw new Error("Unexpected usage payload from server.");
+  }
+
+  return {
+    isPremium,
+    dailyMessageLimit,
+    requestsUsed,
+    requestsRemaining,
+    resetAt,
+    resetInSeconds,
+  };
+};
+
+const fetchUsageSummary = async (): Promise<UsageSummary> => {
+  const token = getAccessToken();
+
+  if (!token) {
+    throw new Error("You must be logged in to load usage.");
+  }
+
+  const response = await fetch(`${AUTH_BASE_URL}/users/me/usage`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const text = await response.text();
+  let payload: unknown = null;
+
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = text;
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      parseErrorMessage(payload) || `Request failed with status ${response.status}.`
+    );
+  }
+
+  return parseUsageSummary(payload);
+};
+
+const formatResetTimer = (totalSeconds: number) => {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return [hours, minutes, seconds].map((value) => value.toString().padStart(2, "0")).join(":");
+};
+
 const Profile = () => {
   const navigate = useNavigate();
   const { user, logout, updateProfile } = useAuth();
 
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [model, setModel] = useState(DEFAULT_MODEL_ID);
   const [theme, setTheme] = useState<ThemePreference>("system");
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [shouldApplyTheme, setShouldApplyTheme] = useState(false);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [usageError, setUsageError] = useState<string | null>(null);
+  const [isLoadingUsage, setIsLoadingUsage] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -53,32 +167,37 @@ const Profile = () => {
 
       if (isThemePreference(parsed.theme)) {
         setTheme(parsed.theme);
+        setShouldApplyTheme(true);
       }
     } catch {
       // Ignore invalid local preference payload.
+    } finally {
+      setPreferencesLoaded(true);
     }
   }, []);
 
   useEffect(() => {
     if (!user) return;
     setName(user.name);
-    setEmail(user.email);
   }, [user]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !preferencesLoaded) return;
 
-    localStorage.setItem(
-      PROFILE_PREFERENCES_KEY,
-      JSON.stringify({
-        model,
-        theme,
-      })
-    );
-  }, [model, theme]);
+    const nextPreferences: {
+      model: string;
+      theme?: ThemePreference;
+    } = { model };
+
+    if (shouldApplyTheme) {
+      nextPreferences.theme = theme;
+    }
+
+    localStorage.setItem(PROFILE_PREFERENCES_KEY, JSON.stringify(nextPreferences));
+  }, [model, theme, preferencesLoaded, shouldApplyTheme]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !shouldApplyTheme) return;
 
     const root = document.documentElement;
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
@@ -97,7 +216,88 @@ const Profile = () => {
 
     mediaQuery.addEventListener("change", applyTheme);
     return () => mediaQuery.removeEventListener("change", applyTheme);
-  }, [theme]);
+  }, [theme, shouldApplyTheme]);
+
+  useEffect(() => {
+    if (!user) {
+      setUsage(null);
+      setUsageError(null);
+      setIsLoadingUsage(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingUsage(true);
+    setUsageError(null);
+
+    const loadUsage = async () => {
+      try {
+        const nextUsage = await fetchUsageSummary();
+        if (!cancelled) {
+          setUsage(nextUsage);
+        }
+      } catch (error: any) {
+        if (!cancelled) {
+          setUsage(null);
+          setUsageError(error?.message || "Failed to load usage.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingUsage(false);
+        }
+      }
+    };
+
+    void loadUsage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!usage || typeof window === "undefined") return;
+
+    const interval = window.setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [usage]);
+
+  const resetAtTimestamp = usage ? Date.parse(usage.resetAt) : Number.NaN;
+  const secondsUntilReset =
+    usage === null
+      ? null
+      : Number.isFinite(resetAtTimestamp)
+        ? Math.max(0, Math.ceil((resetAtTimestamp - now) / 1000))
+        : usage.resetInSeconds;
+
+  useEffect(() => {
+    if (!user || !usage || secondsUntilReset !== 0) return;
+
+    let cancelled = false;
+
+    const refreshUsage = async () => {
+      try {
+        const nextUsage = await fetchUsageSummary();
+        if (!cancelled) {
+          setUsage(nextUsage);
+          setUsageError(null);
+        }
+      } catch (error: any) {
+        if (!cancelled) {
+          setUsageError(error?.message || "Failed to load usage.");
+        }
+      }
+    };
+
+    void refreshUsage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, usage?.resetAt, secondsUntilReset]);
 
   const handleLogout = async () => {
     await logout();
@@ -117,15 +317,7 @@ const Profile = () => {
     try {
       await updateProfile({
         name,
-        email,
-        currentPassword,
-        newPassword,
-        confirmPassword,
       });
-
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
       toast.success("Profile updated successfully.");
     } catch (error: any) {
       toast.error(error?.message || "Failed to update profile.");
@@ -133,6 +325,28 @@ const Profile = () => {
       setIsSubmitting(false);
     }
   };
+
+  const usageCards = [
+    {
+      label: "Rate limit",
+      value: isLoadingUsage
+        ? "..."
+        : usage?.isPremium
+          ? "∞"
+          : usage?.dailyMessageLimit?.toString() || "--",
+    },
+    {
+      label: "Requests today",
+      value: isLoadingUsage ? "..." : usage ? usage.requestsUsed.toString() : "--",
+    },
+    {
+      label: "Reset in",
+      value:
+        isLoadingUsage || secondsUntilReset === null
+          ? "..."
+          : formatResetTimer(secondsUntilReset),
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-background starfield">
@@ -176,20 +390,40 @@ const Profile = () => {
                 </div>
 
                 <div>
-                  <label htmlFor="profile-email" className="mb-1 block text-sm text-foreground/70">
-                    Email
-                  </label>
-                  <input
-                    id="profile-email"
-                    type="email"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors focus:outline-none focus:ring-2 focus:ring-ring md:max-w-xs"
-                    placeholder="you@example.com"
-                    required
-                  />
+                  <p className="mb-1 block text-sm text-foreground/70">Email</p>
+                  <div className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground/80 md:max-w-xs">
+                    {user.email}
+                  </div>
                 </div>
               </div>
+            </section>
+
+            <section className="mb-8">
+              <h2 className="mb-3 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                <Gauge size={14} /> Usage
+              </h2>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {usageCards.map((card) => (
+                  <div
+                    key={card.label}
+                    className="rounded-lg border border-input bg-background px-3 py-3"
+                  >
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                      {card.label}
+                    </p>
+                    <p className="mt-2 text-lg font-medium text-foreground">{card.value}</p>
+                  </div>
+                ))}
+              </div>
+              {usageError ? (
+                <p className="mt-3 text-sm text-destructive">{usageError}</p>
+              ) : usage ? (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  {usage.isPremium
+                    ? "Premium accounts have unlimited daily requests. Usage still resets every day at 00:00 UTC."
+                    : `${usage.requestsRemaining ?? 0} requests remaining before the reset at 00:00 UTC.`}
+                </p>
+              ) : null}
             </section>
 
             <section className="mb-8">
@@ -229,7 +463,10 @@ const Profile = () => {
                     <button
                       key={entry.value}
                       type="button"
-                      onClick={() => setTheme(entry.value)}
+                      onClick={() => {
+                        setTheme(entry.value);
+                        setShouldApplyTheme(true);
+                      }}
                       className={`flex items-center gap-1.5 rounded-lg border px-4 py-2 text-sm transition-colors ${
                         theme === entry.value
                           ? "border-primary/40 bg-accent/60 text-foreground"
@@ -241,59 +478,6 @@ const Profile = () => {
                     </button>
                   );
                 })}
-              </div>
-            </section>
-
-            <section className="mb-8">
-              <h2 className="mb-3 text-xs uppercase tracking-wide text-muted-foreground">Change password</h2>
-              <div className="space-y-3">
-                <div>
-                  <label
-                    htmlFor="profile-current-password"
-                    className="mb-1 block text-sm text-foreground/70"
-                  >
-                    Current password
-                  </label>
-                  <input
-                    id="profile-current-password"
-                    type="password"
-                    value={currentPassword}
-                    onChange={(event) => setCurrentPassword(event.target.value)}
-                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors focus:outline-none focus:ring-2 focus:ring-ring md:max-w-xs"
-                    placeholder="Current password"
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="profile-new-password" className="mb-1 block text-sm text-foreground/70">
-                    New password
-                  </label>
-                  <input
-                    id="profile-new-password"
-                    type="password"
-                    value={newPassword}
-                    onChange={(event) => setNewPassword(event.target.value)}
-                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors focus:outline-none focus:ring-2 focus:ring-ring md:max-w-xs"
-                    placeholder="New password"
-                  />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="profile-confirm-password"
-                    className="mb-1 block text-sm text-foreground/70"
-                  >
-                    Confirm new password
-                  </label>
-                  <input
-                    id="profile-confirm-password"
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors focus:outline-none focus:ring-2 focus:ring-ring md:max-w-xs"
-                    placeholder="Confirm new password"
-                  />
-                </div>
               </div>
             </section>
 

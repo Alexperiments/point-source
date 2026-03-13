@@ -1,11 +1,31 @@
 """Tests for authentication endpoints."""
 
+from datetime import UTC, datetime
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.v1.auth import get_redis as get_auth_redis
+from src.core.rag_config import AGENT_SETTINGS
 from src.core.security import hash_password
+from src.main import app
 from src.models.user import User
+
+
+class _UsageRedis:
+    def __init__(self, values: dict[str, str] | None = None) -> None:
+        self._values = values or {}
+
+    async def get(self, key: str) -> str | None:
+        return self._values.get(key)
+
+    async def set(self, key: str, value: str) -> bool:
+        self._values[key] = value
+        return True
+
+    async def aclose(self) -> None:
+        return None
 
 
 @pytest.mark.asyncio
@@ -282,6 +302,54 @@ async def test_get_current_user_missing_token(client: AsyncClient) -> None:
     response = await client.get("/v1/auth/users/me")
 
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_usage_returns_daily_usage(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """Usage endpoint should expose the current daily counter and reset window."""
+    password = "SecurePass123"
+    user = User(
+        name="Usage User",
+        email="usage@example.com",
+        hashed_password=hash_password(password),
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    login_response = await client.post(
+        "/v1/auth/token",
+        json={"email": user.email, "password": password},
+    )
+    token = login_response.json()["access_token"]
+
+    now = datetime.now(tz=UTC)
+    usage_key = f"daily_message_limit:{now.date().isoformat()}:{user.id}"
+    redis = _UsageRedis({usage_key: "2"})
+
+    async def override_usage_redis() -> _UsageRedis:
+        return redis
+
+    app.dependency_overrides[get_auth_redis] = override_usage_redis
+
+    try:
+        response = await client.get(
+            "/v1/auth/users/me/usage",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_auth_redis, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["is_premium"] is False
+    assert data["daily_message_limit"] == AGENT_SETTINGS.daily_message_limit
+    assert data["requests_used"] == 2
+    assert data["requests_remaining"] == AGENT_SETTINGS.daily_message_limit - 2
+    assert data["reset_in_seconds"] > 0
+    assert data["reset_at"].endswith("Z") or data["reset_at"].endswith("+00:00")
 
 
 @pytest.mark.asyncio

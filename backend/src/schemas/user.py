@@ -179,3 +179,32 @@ class ProfileUpdateResponse(BaseModel):
         default=None,
         description="Token type for the access token",
     )
+
+
+class UserUsageResponse(BaseModel):
+    """Schema for current user usage information."""
+
+    is_premium: bool = Field(
+        ...,
+        description="Whether the user has unlimited daily usage",
+    )
+    daily_message_limit: int | None = Field(
+        default=None,
+        description="Daily request cap for non-premium users",
+    )
+    requests_used: int = Field(
+        ...,
+        description="Number of requests counted for the current UTC day",
+    )
+    requests_remaining: int | None = Field(
+        default=None,
+        description="Remaining requests for the current UTC day",
+    )
+    reset_at: datetime = Field(
+        ...,
+        description="UTC timestamp when the counter resets",
+    )
+    reset_in_seconds: int = Field(
+        ...,
+        description="Seconds remaining until the counter resets",
+    )

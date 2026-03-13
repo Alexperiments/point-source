@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +11,22 @@ import pytest
 from src.core.rag_config import AGENT_SETTINGS
 from src.models.user import User
 from src.services.llm_service import LLMService, LLMServiceError
+
+
+class _FakeRedis:
+    def __init__(self, values: dict[str, str] | None = None) -> None:
+        self._values = values or {}
+
+    async def get(self, key: str) -> str | None:
+        return self._values.get(key)
+
+    async def incr(self, key: str) -> int:
+        next_value = int(self._values.get(key, "0")) + 1
+        self._values[key] = str(next_value)
+        return next_value
+
+    async def expire(self, key: str, _seconds: int) -> bool:
+        return key in self._values
 
 
 class _FakeStreamRun:
@@ -73,6 +90,44 @@ async def test_run_agent_passes_usage_limits(monkeypatch: pytest.MonkeyPatch) ->
         getattr(usage_limits, "tool_calls_limit")
         == AGENT_SETTINGS.tool_calls_limit
     )
+
+
+@pytest.mark.asyncio
+async def test_get_daily_message_usage_for_regular_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Usage summary should expose daily cap, usage, and remaining requests."""
+    user = _test_user()
+    now = datetime.now(tz=UTC)
+    key = f"daily_message_limit:{now.date().isoformat()}:{user.id}"
+    redis = _FakeRedis({key: "2"})
+    monkeypatch.setattr(AGENT_SETTINGS, "daily_message_limit", 3, raising=False)
+
+    usage = await LLMService(session=None, redis=redis).get_daily_message_usage(user)  # type: ignore[arg-type]
+
+    assert usage.is_premium is False
+    assert usage.daily_message_limit == 3
+    assert usage.requests_used == 2
+    assert usage.requests_remaining == 1
+    assert usage.reset_at.tzinfo is UTC
+    assert usage.reset_in_seconds > 0
+
+
+@pytest.mark.asyncio
+async def test_get_daily_message_usage_for_premium_user() -> None:
+    """Premium usage summary should expose unlimited rate limits."""
+    user = _test_user()
+    user.is_premium = True
+    now = datetime.now(tz=UTC)
+    key = f"daily_message_limit:{now.date().isoformat()}:{user.id}"
+    redis = _FakeRedis({key: "7"})
+
+    usage = await LLMService(session=None, redis=redis).get_daily_message_usage(user)  # type: ignore[arg-type]
+
+    assert usage.is_premium is True
+    assert usage.daily_message_limit is None
+    assert usage.requests_used == 7
+    assert usage.requests_remaining is None
 
 
 @pytest.mark.asyncio

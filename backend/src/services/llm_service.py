@@ -28,6 +28,18 @@ class DailyMessageLimitExceededError(LLMServiceError):
 
 
 @dataclass(frozen=True, slots=True)
+class DailyMessageUsage:
+    """Daily usage summary for a user."""
+
+    is_premium: bool
+    daily_message_limit: int | None
+    requests_used: int
+    requests_remaining: int | None
+    reset_at: datetime
+    reset_in_seconds: int
+
+
+@dataclass(frozen=True, slots=True)
 class LLMStreamEvent:
     """A stream event emitted while generating an assistant response."""
 
@@ -59,20 +71,71 @@ class LLMService:
         return UsageLimits(**kwargs)
 
     @staticmethod
-    def _seconds_until_next_midnight_utc(now: datetime) -> int:
+    def _next_midnight_utc(now: datetime) -> datetime:
         tomorrow = now.date() + timedelta(days=1)
-        next_midnight = datetime.combine(tomorrow, datetime.min.time(), tzinfo=UTC)
+        return datetime.combine(tomorrow, datetime.min.time(), tzinfo=UTC)
+
+    @staticmethod
+    def _seconds_until_next_midnight_utc(now: datetime) -> int:
+        next_midnight = LLMService._next_midnight_utc(now)
         return max(1, int((next_midnight - now).total_seconds()))
 
-    async def enforce_daily_message_limit(self, user: User) -> None:
-        """Enforce per-user daily message cap for non-premium users."""
-        if user.is_premium:
-            return
+    @staticmethod
+    def _daily_message_limit_key(user: User, now: datetime) -> str:
+        return f"daily_message_limit:{now.date().isoformat()}:{user.id}"
 
-        daily_limit = AGENT_SETTINGS.daily_message_limit
+    @staticmethod
+    def _build_daily_message_usage(
+        user: User,
+        requests_used: int,
+        now: datetime,
+    ) -> DailyMessageUsage:
+        is_premium = bool(user.is_premium)
+        daily_message_limit = None if is_premium else AGENT_SETTINGS.daily_message_limit
+        clamped_requests_used = (
+            requests_used
+            if daily_message_limit is None
+            else min(requests_used, daily_message_limit)
+        )
+        requests_remaining = (
+            None
+            if daily_message_limit is None
+            else max(0, daily_message_limit - clamped_requests_used)
+        )
+        reset_at = LLMService._next_midnight_utc(now)
+
+        return DailyMessageUsage(
+            is_premium=is_premium,
+            daily_message_limit=daily_message_limit,
+            requests_used=clamped_requests_used,
+            requests_remaining=requests_remaining,
+            reset_at=reset_at,
+            reset_in_seconds=LLMService._seconds_until_next_midnight_utc(now),
+        )
+
+    async def get_daily_message_usage(self, user: User) -> DailyMessageUsage:
+        """Return daily message usage for the current UTC day."""
         now = datetime.now(tz=UTC)
-        day_key = now.date().isoformat()
-        key = f"daily_message_limit:{day_key}:{user.id}"
+        key = self._daily_message_limit_key(user, now)
+
+        try:
+            raw_count = await self.redis.get(key)
+        except Exception as e:
+            raise LLMServiceError(
+                f"Failed to read daily message usage: {e!s}",
+            ) from e
+
+        try:
+            requests_used = int(raw_count or 0)
+        except (TypeError, ValueError):
+            requests_used = 0
+
+        return self._build_daily_message_usage(user, requests_used, now)
+
+    async def _record_daily_message_usage(self, user: User) -> int:
+        """Increment today's message counter and return the raw count."""
+        now = datetime.now(tz=UTC)
+        key = self._daily_message_limit_key(user, now)
 
         try:
             current_count = await self.redis.incr(key)
@@ -85,6 +148,15 @@ class LLMService:
             raise LLMServiceError(
                 f"Failed to enforce daily message limit: {e!s}",
             ) from e
+
+        return current_count
+
+    async def enforce_daily_message_limit(self, user: User) -> None:
+        """Enforce per-user daily message cap for non-premium users."""
+        current_count = await self._record_daily_message_usage(user)
+        if user.is_premium:
+            return
+        daily_limit = AGENT_SETTINGS.daily_message_limit
 
         if current_count > daily_limit:
             raise DailyMessageLimitExceededError(

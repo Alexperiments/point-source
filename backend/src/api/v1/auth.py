@@ -21,12 +21,14 @@ from src.schemas.user import (
     UserLogin,
     UserResponse,
     UserUpdate,
+    UserUsageResponse,
 )
 from src.services.auth_service import (
     AuthService,
     InvalidCredentialsError,
     TokenValidationError,
 )
+from src.services.llm_service import LLMService
 from src.services.user_service import UserAlreadyExistsError, UserService
 
 
@@ -117,6 +119,24 @@ async def get_current_user_info(
 ) -> User:
     """Get current user information."""
     return current_user
+
+
+@router.get("/users/me/usage", response_model=UserUsageResponse)
+async def get_current_user_usage(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_async_session)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> UserUsageResponse:
+    """Get current user's daily request usage."""
+    usage = await LLMService(db, redis).get_daily_message_usage(current_user)
+    return UserUsageResponse(
+        is_premium=usage.is_premium,
+        daily_message_limit=usage.daily_message_limit,
+        requests_used=usage.requests_used,
+        requests_remaining=usage.requests_remaining,
+        reset_at=usage.reset_at,
+        reset_in_seconds=usage.reset_in_seconds,
+    )
 
 
 @router.patch("/users/me", response_model=ProfileUpdateResponse)

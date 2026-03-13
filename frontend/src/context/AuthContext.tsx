@@ -21,7 +21,7 @@ type RegisterInput = {
 
 type ProfileUpdateInput = {
   name: string;
-  email: string;
+  email?: string;
   currentPassword?: string;
   newPassword?: string;
   confirmPassword?: string;
@@ -229,19 +229,33 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       throw new Error("You must be logged in to update your profile.");
     }
 
+    const payload: Record<string, string> = {
+      name: name.trim(),
+    };
+
+    if (typeof email === "string") {
+      payload.email = normalizeEmail(email);
+    }
+
+    if (currentPassword?.trim()) {
+      payload.current_password = currentPassword.trim();
+    }
+
+    if (newPassword?.trim()) {
+      payload.new_password = newPassword.trim();
+    }
+
+    if (confirmPassword?.trim()) {
+      payload.confirm_password = confirmPassword.trim();
+    }
+
     const response = await requestJson<Record<string, unknown>>(`${AUTH_BASE_URL}/users/me`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({
-        name: name.trim(),
-        email: normalizeEmail(email),
-        current_password: currentPassword?.trim() || "",
-        new_password: newPassword?.trim() || "",
-        confirm_password: confirmPassword?.trim() || "",
-      }),
+      body: JSON.stringify(payload),
     });
 
     const nextToken =
