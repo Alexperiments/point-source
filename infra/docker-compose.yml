@@ -32,7 +32,7 @@ services:
       - letsencrypt:/etc/letsencrypt
       - certbot-www:/var/www/certbot
       - ./certbot/renew.sh:/usr/local/bin/renew.sh:ro
-    command: ["/bin/sh", "/usr/local/bin/renew.sh"]
+    entrypoint: ["/bin/sh", "/usr/local/bin/renew.sh"]
     restart: unless-stopped
 
   point-source:
