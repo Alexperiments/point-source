@@ -143,7 +143,7 @@ class AdminAuthProvider(AuthProvider):
 admin = Admin(
     engine=engine,
     title="Admin Panel",
-    base_url="/admin",
+    base_url="/",
     auth_provider=AdminAuthProvider(),
 )
 
