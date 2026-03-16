@@ -50,6 +50,7 @@ def test_session_middleware_is_hardened() -> None:
     assert options["same_site"] == "strict"
     assert options["https_only"] is (settings.environment != "development")
     assert options["max_age"] == 60 * 60 * 8
+    assert options["secret_key"] == settings.admin_session_secret_key.get_secret_value()
 
 
 def _request_with_session(session: dict[str, str] | None = None) -> Request:

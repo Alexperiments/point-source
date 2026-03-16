@@ -14,6 +14,7 @@ from pydantic import (
     RedisDsn,
     SecretStr,
     field_validator,
+    model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -77,7 +78,7 @@ class Settings(BaseSettings):
     logfire_send_to_logfire: bool | Literal["if-token-present"] = Field(
         default="if-token-present",
     )
-    allowed_origins: str = Field(default="*")
+    allowed_origins: str = Field(default="")
 
     database_user: str
     database_password: SecretStr
@@ -89,6 +90,9 @@ class Settings(BaseSettings):
     redis_host: str = Field(default="localhost")
 
     jwt_secret_key: SecretStr = Field(
+        default_factory=lambda: SecretStr(secrets.token_hex(32)),
+    )
+    admin_session_secret_key: SecretStr = Field(
         default_factory=lambda: SecretStr(secrets.token_hex(32)),
     )
     jwt_algorithm: str = Field(default="HS256")
@@ -126,6 +130,18 @@ class Settings(BaseSettings):
             msg = f"Invalid JWT algorithm: {v}"
             raise ValueError(msg)
         return v
+
+    @model_validator(mode="after")
+    def validate_allowed_origins_for_environment(self) -> "Settings":
+        """Require an explicit CORS allowlist outside development."""
+        if self.environment != "production":
+            return self
+
+        allowed_origins = self.allowed_origins.strip()
+        if allowed_origins in {"", "*"}:
+            msg = "ALLOWED_ORIGINS must be explicitly configured outside development"
+            raise ValueError(msg)
+        return self
 
     @property
     def redis_url(self) -> RedisDsn:

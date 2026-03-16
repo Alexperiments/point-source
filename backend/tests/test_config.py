@@ -64,6 +64,7 @@ class TestSettings:
                 "DATABASE_PORT": "5432",
                 "DATABASE_NAME": "test_db",
                 "REDIS_PASSWORD": "redis_pass",
+                "ALLOWED_ORIGINS": "",
             },
             clear=False,
         ):
@@ -72,7 +73,7 @@ class TestSettings:
             assert settings.debug is False
             assert settings.access_token_expire_minutes == 30
             assert settings.redis_host == "localhost"
-            assert settings.allowed_origins == "*"
+            assert settings.allowed_origins == ""
             assert settings.logfire_send_to_logfire == "if-token-present"
 
     def test_jwt_secret_key_default_factory(self) -> None:
@@ -93,6 +94,12 @@ class TestSettings:
             settings = Settings()
             assert settings.jwt_secret_key is not None
             assert len(settings.jwt_secret_key.get_secret_value()) > 0
+            assert settings.admin_session_secret_key is not None
+            assert len(settings.admin_session_secret_key.get_secret_value()) > 0
+            assert (
+                settings.admin_session_secret_key.get_secret_value()
+                != settings.jwt_secret_key.get_secret_value()
+            )
 
     def test_jwt_algorithm_validation_valid(self) -> None:
         """Test that valid JWT algorithms are accepted."""
@@ -215,6 +222,29 @@ class TestSettings:
             settings = Settings()
             origins = settings.allowed_origins_list
             assert origins == ["*"]
+
+    def test_production_requires_explicit_allowed_origins(self) -> None:
+        """Production must not fall back to wildcard or empty CORS."""
+        with patch.dict(
+            os.environ,
+            {
+                "ENVIRONMENT": "production",
+                "LOGFIRE_TOKEN": "test_token",
+                "DATABASE_USER": "test_user",
+                "DATABASE_PASSWORD": "test_pass",
+                "DATABASE_HOST": "localhost",
+                "DATABASE_PORT": "5432",
+                "DATABASE_NAME": "test_db",
+                "REDIS_PASSWORD": "redis_pass",
+                "ALLOWED_ORIGINS": "*",
+            },
+            clear=False,
+        ):
+            with pytest.raises(ValidationError) as exc_info:
+                Settings(_env_file=None)
+            assert "ALLOWED_ORIGINS must be explicitly configured" in str(
+                exc_info.value
+            )
 
     def test_allowed_origins_list_multiple(self) -> None:
         """Test that allowed_origins_list splits comma-separated values."""
@@ -402,10 +432,11 @@ class TestSettings:
                 "DATABASE_PORT": "5432",
                 "DATABASE_NAME": "test_db",
                 "REDIS_PASSWORD": "redis_pass",
+                "ALLOWED_ORIGINS": "https://example.com",
             },
             clear=False,
         ):
-            settings = Settings()
+            settings = Settings(_env_file=None)
             assert settings.environment == "production"
 
     def test_environment_default(self) -> None:

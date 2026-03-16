@@ -78,7 +78,7 @@ logfire.instrument_fastapi(app)
 
 app.add_middleware(
     SessionMiddleware,
-    secret_key=settings.jwt_secret_key.get_secret_value(),
+    secret_key=settings.admin_session_secret_key.get_secret_value(),
     https_only=settings.environment != "development",
     same_site="strict",
     max_age=60 * 60 * 8,
