@@ -106,11 +106,17 @@ export async function streamChat({
   });
 
   if (resp.status === 429) {
+    const message = await parseErrorMessage(resp);
+    const retryAfterSeconds = parseRetryAfterSeconds(resp.headers.get("Retry-After"));
+    const isDailyQuota =
+      message.toLowerCase().includes("daily message limit reached") ||
+      retryAfterSeconds !== null;
+
     throw new ChatStreamError({
-      message: await parseErrorMessage(resp),
+      message,
       status: resp.status,
-      code: "daily_quota",
-      retryAfterSeconds: parseRetryAfterSeconds(resp.headers.get("Retry-After")),
+      code: isDailyQuota ? "daily_quota" : "request_failed",
+      retryAfterSeconds,
     });
   }
 

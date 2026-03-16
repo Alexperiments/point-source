@@ -98,6 +98,9 @@ const fetchUsageSummary = async (): Promise<UsageSummary> => {
   return parseUsageSummary(payload);
 };
 
+const isDailyQuotaExhausted = (usage: UsageSummary): boolean =>
+  !usage.isPremium && usage.requestsRemaining === 0;
+
 const Index = () => {
   const { user, isLoading } = useAuth();
   const isMobile = useIsMobile();
@@ -111,6 +114,15 @@ const Index = () => {
   const [dailyQuotaRemainingSeconds, setDailyQuotaRemainingSeconds] = useState<number | null>(null);
 
   const activeConversation = conversations.find((c) => c.id === activeId) ?? null;
+
+  const syncDailyQuotaLock = async (): Promise<number | null> => {
+    const usage = await fetchUsageSummary();
+    if (!isDailyQuotaExhausted(usage)) {
+      return null;
+    }
+
+    return Math.max(1, usage.resetInSeconds);
+  };
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -167,7 +179,7 @@ const Index = () => {
         const usage = await fetchUsageSummary();
         if (cancelled) return;
 
-        if (!usage.isPremium && usage.requestsRemaining === 0) {
+        if (isDailyQuotaExhausted(usage)) {
           setDailyQuotaRemainingSeconds(Math.max(1, usage.resetInSeconds));
           return;
         }
@@ -330,7 +342,17 @@ const Index = () => {
     } catch (e: any) {
       setAgentStatus("idle");
       if (e instanceof ChatStreamError && e.code === "daily_quota") {
-        setDailyQuotaRemainingSeconds(Math.max(1, e.retryAfterSeconds ?? 1));
+        if (typeof e.retryAfterSeconds === "number" && e.retryAfterSeconds > 1) {
+          setDailyQuotaRemainingSeconds(e.retryAfterSeconds);
+          return;
+        }
+
+        try {
+          const resetInSeconds = await syncDailyQuotaLock();
+          setDailyQuotaRemainingSeconds(resetInSeconds);
+        } catch {
+          toast.error(e.message || "Daily quota reached.");
+        }
         return;
       }
 
