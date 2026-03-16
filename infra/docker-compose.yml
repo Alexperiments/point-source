@@ -8,8 +8,8 @@ services:
       point-source:
         condition: service_started
     ports:
-      - "80:80"
-      - "443:443"
+      - "127.0.0.1:80:80"
+      - "127.0.0.1:443:443"
     networks:
       app:
         ipv4_address: 172.31.0.2
