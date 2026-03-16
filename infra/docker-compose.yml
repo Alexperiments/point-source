@@ -94,6 +94,7 @@ services:
       - /etc/wal-g.d/env:/etc/wal-g.d/env:ro
     networks:
       - database
+      - egress
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-postgres} -d ${DATABASE_NAME:-point_source_db}"]
@@ -133,3 +134,4 @@ networks:
     ipam:
       config:
         - subnet: 172.30.0.0/24
+  egress:
