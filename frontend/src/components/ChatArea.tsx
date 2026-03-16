@@ -4,6 +4,7 @@ import type { Conversation, AgentStatus } from "@/pages/Index";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
+import { Link } from "react-router-dom";
 import "katex/dist/katex.min.css";
 import ThinkingIndicator from "@/components/ThinkingIndicator";
 import { toast } from "sonner";
@@ -135,6 +136,23 @@ const ChatArea = ({ conversation, onSend, onRetry, agentStatus, onOpenSidebar }:
         </div>
       </div>
 
+      <div className="shrink-0 border-b border-border bg-accent/35">
+        <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-3 px-3 py-2 sm:px-4">
+          <p className="text-[11px] leading-5 text-muted-foreground sm:text-xs">
+            <span className="mr-2 font-semibold uppercase tracking-[0.22em] text-primary">
+              Alpha
+            </span>
+            This version is in alpha and currently has limited data access.
+          </p>
+          <Link
+            to="/about"
+            className="shrink-0 text-[11px] font-medium text-primary underline-offset-4 transition-colors hover:text-primary/80 hover:underline sm:text-xs"
+          >
+            About
+          </Link>
+        </div>
+      </div>
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
         {messages.length === 0 && agentStatus === "idle" ? (
@@ -145,7 +163,7 @@ const ChatArea = ({ conversation, onSend, onRetry, agentStatus, onOpenSidebar }:
               </div>
               <h2 className="text-lg font-medium text-foreground">How can I help you today?</h2>
               <p className="text-sm text-muted-foreground max-w-sm">
-                Start a conversation by typing a message below.
+                Start a conversation by asking a question about astrophysics.
               </p>
             </div>
           </div>
