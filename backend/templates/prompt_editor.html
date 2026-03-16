@@ -203,6 +203,7 @@
         <!-- CENTER: Editor -->
         <div class="main-editor">
             <form method="post" id="promptForm" class="h-100 d-flex flex-column">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="action" value="save_commit">
                 <input type="hidden" name="prompt_id" value="{{ selected_prompt.id if selected_prompt else '' }}">
 
@@ -264,7 +265,8 @@
                 {% if selected_prompt and selected_prompt.versions %}
                     {% for ver in selected_prompt.versions %}
                     <div class="version-item {% if ver.is_active %}active{% endif %}"
-                         onclick="viewVersion(`{{ ver.content | replace('`', '\\`') | replace('\n', '\\n') }}`)">
+                         data-version-content='{{ ver.content | tojson | forceescape }}'
+                         onclick="viewVersion(this.dataset.versionContent)">
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <span class="badge bg-secondary-lt">v{{ ver.version_number }}</span>
                             <small class="text-muted">{{ ver.created_at.strftime('%b %d') }}</small>
@@ -279,6 +281,7 @@
                             {% else %}
                                 <span></span>
                                 <form method="post" style="display:inline;" onsubmit="return confirm('Rollback to this version?');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                     <input type="hidden" name="action" value="activate_version">
                                     <input type="hidden" name="prompt_id" value="{{ selected_prompt.id }}">
                                     <input type="hidden" name="version_id" value="{{ ver.id }}">
@@ -303,12 +306,9 @@
 </div>
 
 <script>
-    function viewVersion(content) {
+    function viewVersion(serializedContent) {
         const textarea = document.getElementById('promptContent');
-        const originalContent = textarea.value;
-
-        // Decode escaped content
-        textarea.value = content.replace(/\\n/g, '\n').replace(/\\`/g, '`');
+        textarea.value = JSON.parse(serializedContent);
 
         // Visual feedback (Flash border instead of background to stay clean in dark mode)
         textarea.style.borderColor = "var(--tblr-primary)";

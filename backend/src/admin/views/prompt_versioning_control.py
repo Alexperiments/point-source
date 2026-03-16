@@ -7,6 +7,7 @@ from starlette.responses import RedirectResponse, Response
 from starlette.templating import Jinja2Templates
 from starlette_admin import CustomView
 
+from src.admin.security import CSRF_FORM_FIELD, get_csrf_token, validate_csrf_token
 from src.core.database.base import async_session_factory
 from src.core.database.redis import get_redis_pool
 from src.services.prompt_service import PromptService
@@ -52,6 +53,7 @@ class PromptManagerView(CustomView):
     ) -> Response:
         """Handle Form Submissions."""
         form = await request.form()
+        validate_csrf_token(request, form.get(CSRF_FORM_FIELD))
         action = form.get("action")
 
         try:
@@ -121,5 +123,6 @@ class PromptManagerView(CustomView):
                 "prompts": all_prompts,
                 "selected_prompt": selected_prompt,
                 "current_prompt_id": current_prompt_id,
+                "csrf_token": get_csrf_token(request),
             },
         )

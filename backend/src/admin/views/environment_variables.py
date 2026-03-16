@@ -6,6 +6,7 @@ from starlette.responses import RedirectResponse, Response
 from starlette.templating import Jinja2Templates
 from starlette_admin import CustomView
 
+from src.admin.security import CSRF_FORM_FIELD, get_csrf_token, validate_csrf_token
 from src.core.config import env_file_path
 
 
@@ -37,6 +38,7 @@ class EnvSettingsView(CustomView):
 
         if request.method == "POST":
             form = await request.form()
+            validate_csrf_token(request, form.get(CSRF_FORM_FIELD))
             action = form.get("action")
             key = form.get("key")
             value = form.get("value")
@@ -60,6 +62,7 @@ class EnvSettingsView(CustomView):
             context={
                 "request": request,
                 "env_vars": env_vars,
+                "csrf_token": get_csrf_token(request),
                 "title": "Environment Settings",
             },
         )

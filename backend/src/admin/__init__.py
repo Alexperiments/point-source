@@ -1,6 +1,7 @@
 """Admin panel configuration."""
 
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import jinja2
 from fastapi import status
@@ -112,6 +113,7 @@ class AdminAuthProvider(AuthProvider):
             )
 
         form = await request.form()
+        fallback_url = str(request.url_for(admin.route_name + ":index"))
         try:
             return await self.login(
                 username=form.get("email"),
@@ -119,8 +121,10 @@ class AdminAuthProvider(AuthProvider):
                 remember_me=form.get("remember_me") == "on",
                 request=request,
                 response=RedirectResponse(
-                    request.query_params.get("next")
-                    or request.url_for(admin.route_name + ":index"),
+                    _safe_redirect_target(
+                        request.query_params.get("next"),
+                        fallback_url,
+                    ),
                     status_code=HTTP_303_SEE_OTHER,
                 ),
             )
@@ -138,6 +142,19 @@ class AdminAuthProvider(AuthProvider):
                 context={"error": error.msg, "_is_login_path": True},
                 status_code=HTTP_400_BAD_REQUEST,
             )
+
+
+def _safe_redirect_target(next_url: str | None, fallback_url: str) -> str:
+    """Only allow redirects to local absolute paths within the current origin."""
+    if not next_url:
+        return fallback_url
+
+    parsed = urlsplit(next_url)
+    if parsed.scheme or parsed.netloc:
+        return fallback_url
+    if not next_url.startswith("/") or next_url.startswith("//"):
+        return fallback_url
+    return next_url
 
 
 admin = Admin(

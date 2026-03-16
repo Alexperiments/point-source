@@ -38,6 +38,7 @@
                                                 <i class="fa fa-edit"></i>
                                             </button>
                                             <form method="post" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete {{ key }}?');">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                                 <input type="hidden" name="action" value="delete">
                                                 <input type="hidden" name="key" value="{{ key }}">
                                                 <button type="submit" class="btn btn-icon btn-ghost-danger" title="Delete">
@@ -67,6 +68,7 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="action" value="update">
 
                     <div class="mb-3">
