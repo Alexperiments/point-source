@@ -45,7 +45,7 @@ services:
 
   litellm:
     container_name: litellm-proxy
-    image: "ghcr.io/berriai/litellm:main-latest"
+    image: "ghcr.io/berriai/litellm:v1.82.0-stable.patch5"
     volumes:
       - ./litellm/litellm.yaml:/app/litellm/litellm.yaml
     command: [ "--config", "/app/litellm/litellm.yaml", "--port", "4000" ]
@@ -74,7 +74,7 @@ services:
 
   postgres:
     container_name: postgres
-    image: timescale/timescaledb-ha:pg17
+    image: timescale/timescaledb-ha:pg17.9-ts2.25.2
     shm_size: ${POSTGRES_SHM_SIZE:-1gb}
     command:
       [
@@ -103,7 +103,7 @@ services:
       retries: 5
   redis:
     container_name: redis
-    image: redis:7-alpine
+    image: redis:7.4.8-alpine3.21
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
     expose:
       - "6379"
