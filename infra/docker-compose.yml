@@ -9,31 +9,15 @@ services:
         condition: service_started
     ports:
       - "127.0.0.1:80:80"
-      - "127.0.0.1:443:443"
     networks:
       app:
         ipv4_address: 172.31.0.2
     restart: unless-stopped
-    volumes:
-      - letsencrypt:/etc/letsencrypt
-      - certbot-www:/var/www/certbot
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost/nginx-health"]
       interval: 10s
       timeout: 5s
       retries: 3
-
-  certbot:
-    container_name: point-source-certbot
-    image: certbot/certbot:latest
-    networks:
-      - app
-    volumes:
-      - letsencrypt:/etc/letsencrypt
-      - certbot-www:/var/www/certbot
-      - ./certbot/renew.sh:/usr/local/bin/renew.sh:ro
-    entrypoint: ["/bin/sh", "/usr/local/bin/renew.sh"]
-    restart: unless-stopped
 
   point-source:
     container_name: point-source
@@ -134,8 +118,6 @@ services:
       retries: 5
 
 volumes:
-  certbot-www:
-  letsencrypt:
   postgres-data:
   pgadmin-data:
   redis-data:
