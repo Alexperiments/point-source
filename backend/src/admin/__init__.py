@@ -18,7 +18,7 @@ from starlette_admin.auth import AdminConfig, AdminUser, AuthProvider
 from starlette_admin.contrib.sqla import Admin
 from starlette_admin.exceptions import FormValidationError, LoginFailed
 
-from src.admin.views import EnvSettingsView, PromptManagerView, UsersView
+from src.admin.views import PromptManagerView, UsersView
 from src.core.database.base import async_session_factory, engine
 from src.core.security import verify_password
 from src.models import User
@@ -165,5 +165,4 @@ admin = Admin(
 )
 
 admin.add_view(UsersView(model=User, icon="fa fa-users"))
-admin.add_view(EnvSettingsView(templates=templates))
 admin.add_view(PromptManagerView(templates=templates))
