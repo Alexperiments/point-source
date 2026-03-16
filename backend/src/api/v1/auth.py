@@ -10,7 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database.base import get_async_session
 from src.core.database.redis import get_redis_pool
-from src.core.security import hash_password, oauth2_scheme, verify_password
+from src.core.security import (
+    clear_auth_cookie,
+    get_request_access_token,
+    hash_password,
+    set_auth_cookie,
+    verify_password,
+)
 from src.models.user import User
 from src.schemas.user import (
     ProfileUpdateRequest,
@@ -45,7 +51,7 @@ async def get_redis() -> AsyncIterator[Redis]:
 
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    token: str = Depends(get_request_access_token),
     db: AsyncSession = Depends(get_async_session),
     redis: Redis = Depends(get_redis),
 ) -> User:
@@ -77,6 +83,7 @@ async def register(
 
 @router.post("/token", response_model=Token)
 async def login(
+    response: Response,
     user_data: UserLogin,
     db: Annotated[AsyncSession, Depends(get_async_session)],
     redis: Annotated[Redis, Depends(get_redis)],
@@ -84,13 +91,16 @@ async def login(
     """Login a user."""
     try:
         auth_service = AuthService(db, redis)
-        return await auth_service.login(user_data)
+        token = await auth_service.login(user_data)
+        set_auth_cookie(response, token.access_token)
     except InvalidCredentialsError as e:
         raise HTTPException(
             status_code=401,
             detail=str(e),
             headers={"WWW-Authenticate": "Bearer"},
         ) from e
+    else:
+        return token
 
 
 @router.get("/validate-token", response_model=TokenValidationResponse)
@@ -110,7 +120,9 @@ async def logout(
     """Invalidate currently active access tokens for the user."""
     auth_service = AuthService(db, redis)
     await auth_service.revoke_user_tokens(current_user)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    clear_auth_cookie(response)
+    return response
 
 
 @router.get("/users/me", response_model=UserResponse)
@@ -141,6 +153,7 @@ async def get_current_user_usage(
 
 @router.patch("/users/me", response_model=ProfileUpdateResponse)
 async def update_current_user_info(
+    response: Response,
     profile_data: ProfileUpdateRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_async_session)],
@@ -182,6 +195,7 @@ async def update_current_user_info(
         token = await auth_service.create_token_for_user(user)
         access_token = token.access_token
         token_type = token.token_type
+        set_auth_cookie(response, token.access_token)
 
     await db.refresh(user)
 

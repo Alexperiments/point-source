@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.v1.auth import get_redis as get_auth_redis
 from src.core.rag_config import AGENT_SETTINGS
-from src.core.security import hash_password
+from src.core.security import AUTH_COOKIE_NAME, hash_password
 from src.main import app
 from src.models.user import User
 
@@ -130,6 +130,12 @@ async def test_login_success(
     assert isinstance(data["access_token"], str)
     assert len(data["access_token"]) > 0
 
+    cookie_header = response.headers.get("set-cookie", "")
+    assert f"{AUTH_COOKIE_NAME}=" in cookie_header
+    assert "httponly" in cookie_header.lower()
+    assert "samesite=lax" in cookie_header.lower()
+    assert client.cookies.get(AUTH_COOKIE_NAME) == data["access_token"]
+
 
 @pytest.mark.asyncio
 async def test_login_invalid_email(client: AsyncClient) -> None:
@@ -241,6 +247,38 @@ async def test_validate_token_missing_header(client: AsyncClient) -> None:
     response = await client.get("/v1/auth/validate-token")
 
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_validate_token_success_with_auth_cookie(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """Cookie-based auth should work without an Authorization header."""
+    password = "SecurePass123"
+    user = User(
+        name="Cookie User",
+        email="cookie@example.com",
+        hashed_password=hash_password(password),
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    login_response = await client.post(
+        "/v1/auth/token",
+        json={"email": user.email, "password": password},
+    )
+    assert login_response.status_code == 200
+    token = login_response.json()["access_token"]
+
+    response = await client.get(
+        "/v1/auth/validate-token",
+        cookies={AUTH_COOKIE_NAME: token},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user_id"] == str(user.id)
 
 
 @pytest.mark.asyncio
@@ -379,8 +417,55 @@ async def test_logout_revokes_access_token(
 
     logout_response = await client.post("/v1/auth/logout", headers=headers)
     assert logout_response.status_code == 204
+    cookie_header = logout_response.headers.get("set-cookie", "")
+    assert f"{AUTH_COOKIE_NAME}=" in cookie_header
+    assert "max-age=0" in cookie_header.lower()
 
     me_after = await client.get("/v1/auth/users/me", headers=headers)
+    assert me_after.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_clears_auth_cookie(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """Logout should also invalidate the browser cookie session."""
+    password = "SecurePass123"
+    user = User(
+        name="Cookie Logout User",
+        email="cookie-logout@example.com",
+        hashed_password=hash_password(password),
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    login_response = await client.post(
+        "/v1/auth/token",
+        json={"email": user.email, "password": password},
+    )
+    assert login_response.status_code == 200
+    token = login_response.json()["access_token"]
+
+    me_before = await client.get(
+        "/v1/auth/users/me",
+        cookies={AUTH_COOKIE_NAME: token},
+    )
+    assert me_before.status_code == 200
+
+    logout_response = await client.post(
+        "/v1/auth/logout",
+        cookies={AUTH_COOKIE_NAME: token},
+    )
+    assert logout_response.status_code == 204
+    cookie_header = logout_response.headers.get("set-cookie", "")
+    assert f"{AUTH_COOKIE_NAME}=" in cookie_header
+    assert "max-age=0" in cookie_header.lower()
+
+    me_after = await client.get(
+        "/v1/auth/users/me",
+        cookies={AUTH_COOKIE_NAME: token},
+    )
     assert me_after.status_code == 401
 
 

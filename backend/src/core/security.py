@@ -3,13 +3,26 @@
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
+from fastapi import HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer
+from fastapi.security.utils import get_authorization_scheme_param
 from jose import jwt
 
 from src.core.config import settings
 
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/v1/auth/token", scheme_name="Bearer")
+AUTH_COOKIE_NAME = (
+    "__Host-point-source-auth"
+    if settings.environment != "development"
+    else "point-source-auth"
+)
+AUTH_COOKIE_MAX_AGE_SECONDS = settings.access_token_expire_minutes * 60
+
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="/v1/auth/token",
+    scheme_name="Bearer",
+    auto_error=False,
+)
 
 
 def hash_password(password: str) -> str:
@@ -76,4 +89,46 @@ def create_access_token(
         to_encode,
         settings.jwt_secret_key.get_secret_value(),
         algorithm=settings.jwt_algorithm,
+    )
+
+
+def set_auth_cookie(response: Response, token: str) -> None:
+    """Set the browser auth cookie for the current session."""
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=settings.environment != "development",
+        samesite="lax",
+        path="/",
+        max_age=AUTH_COOKIE_MAX_AGE_SECONDS,
+    )
+
+
+def clear_auth_cookie(response: Response) -> None:
+    """Clear the browser auth cookie."""
+    response.delete_cookie(
+        key=AUTH_COOKIE_NAME,
+        path="/",
+        secure=settings.environment != "development",
+        httponly=True,
+        samesite="lax",
+    )
+
+
+def get_request_access_token(request: Request) -> str:
+    """Resolve an auth token from the cookie first, then bearer auth."""
+    cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
+    if cookie_token:
+        return cookie_token
+
+    authorization = request.headers.get("Authorization")
+    scheme, token = get_authorization_scheme_param(authorization)
+    if authorization and scheme.lower() == "bearer" and token:
+        return token
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
     )

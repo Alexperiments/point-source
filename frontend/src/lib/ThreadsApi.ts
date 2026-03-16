@@ -1,5 +1,4 @@
 import { THREADS_BASE_URL } from "@/lib/api";
-import { getAccessToken } from "@/lib/authStorage";
 
 export type ThreadMessagePayload = {
   id: string;
@@ -34,16 +33,11 @@ const parseErrorMessage = async (response: Response): Promise<string> => {
 };
 
 const authorizedRequest = async (input: RequestInfo, init: RequestInit = {}) => {
-  const token = getAccessToken();
-  if (!token) {
-    throw new Error("You must be logged in.");
-  }
-
   const response = await fetch(input, {
     ...init,
+    credentials: init.credentials ?? "include",
     headers: {
       ...(init.headers || {}),
-      Authorization: `Bearer ${token}`,
     },
   });
 

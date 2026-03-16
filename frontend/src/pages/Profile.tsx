@@ -2,7 +2,6 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Cpu, Gauge, LogOut, Monitor, Moon, Save, Sun, User } from "lucide-react";
 import { AUTH_BASE_URL } from "@/lib/api";
-import { getAccessToken } from "@/lib/authStorage";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 
@@ -93,17 +92,9 @@ const parseUsageSummary = (payload: unknown): UsageSummary => {
 };
 
 const fetchUsageSummary = async (): Promise<UsageSummary> => {
-  const token = getAccessToken();
-
-  if (!token) {
-    throw new Error("You must be logged in to load usage.");
-  }
-
   const response = await fetch(`${AUTH_BASE_URL}/users/me/usage`, {
     method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    credentials: "include",
   });
 
   const text = await response.text();

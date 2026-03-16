@@ -54,7 +54,7 @@ config = SecurityConfig(
     cors_allow_origins=settings.allowed_origins_list,
     cors_allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     cors_allow_headers=["*"],
-    cors_allow_credentials=settings.environment != "development",
+    cors_allow_credentials=True,
     exclude_paths=SECURITY_EXCLUDE_PATHS,
     passive_mode=True,
     log_suspicious_level="WARNING",

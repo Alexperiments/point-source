@@ -1,5 +1,4 @@
 import { CHAT_STREAM_URL } from "@/lib/api";
-import { getAccessToken } from "@/lib/authStorage";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -46,12 +45,11 @@ export async function streamChat({
   onDone: () => void;
   onStatus?: (status: StreamStatus | string) => void;
 }) {
-  const token = getAccessToken();
   const resp = await fetch(CHAT_STREAM_URL, {
     method: "POST",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify({ messages, thread_id: threadId }),
   });

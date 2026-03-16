@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { AUTH_BASE_URL } from "@/lib/api";
-import { clearAccessToken, getAccessToken, setAccessToken } from "@/lib/authStorage";
 
 export type AuthUser = {
   id: string;
@@ -66,7 +65,10 @@ const parseErrorMessage = (payload: unknown): string | null => {
 };
 
 const requestJson = async <T,>(url: string, init: RequestInit): Promise<T> => {
-  const response = await fetch(url, init);
+  const response = await fetch(url, {
+    ...init,
+    credentials: init.credentials ?? "include",
+  });
   const text = await response.text();
   let payload: unknown = null;
   if (text) {
@@ -108,12 +110,9 @@ const parseUser = (payload: unknown): AuthUser => {
   return { id, email, name };
 };
 
-const fetchCurrentUser = async (token: string) => {
+const fetchCurrentUser = async () => {
   const user = await requestJson<unknown>(`${AUTH_BASE_URL}/users/me`, {
     method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
   });
   return parseUser(user);
 };
@@ -126,18 +125,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     let mounted = true;
 
     const loadSession = async () => {
-      const token = getAccessToken();
-
-      if (!token) {
-        if (mounted) setIsLoading(false);
-        return;
-      }
-
       try {
-        const currentUser = await fetchCurrentUser(token);
+        const currentUser = await fetchCurrentUser();
         if (mounted) setUser(currentUser);
       } catch {
-        clearAccessToken();
         if (mounted) setUser(null);
       } finally {
         if (mounted) setIsLoading(false);
@@ -159,7 +150,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       throw new Error("Email and password are required.");
     }
 
-    const tokenData = await requestJson<Record<string, unknown>>(`${AUTH_BASE_URL}/token`, {
+    await requestJson<Record<string, unknown>>(`${AUTH_BASE_URL}/token`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -170,21 +161,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }),
     });
 
-    const token =
-      (typeof tokenData.access_token === "string" && tokenData.access_token) ||
-      (typeof tokenData.token === "string" && tokenData.token) ||
-      null;
-
-    if (!token) {
-      throw new Error("Token missing from login response.");
-    }
-
-    setAccessToken(token);
     try {
-      const currentUser = await fetchCurrentUser(token);
+      const currentUser = await fetchCurrentUser();
       setUser(currentUser);
     } catch (error) {
-      clearAccessToken();
+      setUser(null);
       throw error;
     }
   };
@@ -223,12 +204,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     newPassword,
     confirmPassword,
   }: ProfileUpdateInput) => {
-    const token = getAccessToken();
-
-    if (!token) {
-      throw new Error("You must be logged in to update your profile.");
-    }
-
     const payload: Record<string, string> = {
       name: name.trim(),
     };
@@ -249,47 +224,31 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       payload.confirm_password = confirmPassword.trim();
     }
 
-    const response = await requestJson<Record<string, unknown>>(`${AUTH_BASE_URL}/users/me`, {
+    await requestJson<Record<string, unknown>>(`${AUTH_BASE_URL}/users/me`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(payload),
     });
 
-    const nextToken =
-      (typeof response.access_token === "string" && response.access_token) || token;
-
-    if (nextToken !== token) {
-      setAccessToken(nextToken);
-    }
-
     try {
-      const currentUser = await fetchCurrentUser(nextToken);
+      const currentUser = await fetchCurrentUser();
       setUser(currentUser);
     } catch (error) {
-      clearAccessToken();
       setUser(null);
       throw error;
     }
   };
 
   const logout = async () => {
-    const token = getAccessToken();
-    if (token) {
-      try {
-        await requestJson(`${AUTH_BASE_URL}/logout`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-      } catch {
-        // Ignore logout request failures and clear local auth state anyway.
-      }
+    try {
+      await requestJson(`${AUTH_BASE_URL}/logout`, {
+        method: "POST",
+      });
+    } catch {
+      // Ignore logout request failures and clear local auth state anyway.
     }
-    clearAccessToken();
     setUser(null);
   };
 
