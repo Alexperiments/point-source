@@ -15,6 +15,7 @@ interface Props {
   onRetry: (assistantMessageId: string) => void;
   agentStatus: AgentStatus;
   onOpenSidebar: () => void;
+  dailyQuotaRemainingSeconds: number | null;
 }
 
 const normalizeAssistantMarkdown = (content: string): string => {
@@ -62,11 +63,28 @@ const normalizeAssistantMarkdown = (content: string): string => {
   return lines.join("\n");
 };
 
-const ChatArea = ({ conversation, onSend, onRetry, agentStatus, onOpenSidebar }: Props) => {
+const formatQuotaTimer = (totalSeconds: number): string => {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return [hours, minutes, seconds].map((value) => value.toString().padStart(2, "0")).join(":");
+};
+
+const ChatArea = ({
+  conversation,
+  onSend,
+  onRetry,
+  agentStatus,
+  onOpenSidebar,
+  dailyQuotaRemainingSeconds,
+}: Props) => {
   const [input, setInput] = useState("");
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isDailyQuotaLocked =
+    dailyQuotaRemainingSeconds !== null && dailyQuotaRemainingSeconds > 0;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -80,7 +98,7 @@ const ChatArea = ({ conversation, onSend, onRetry, agentStatus, onOpenSidebar }:
   }, [input]);
 
   const handleSubmit = () => {
-    if (!input.trim() || agentStatus !== "idle") return;
+    if (!input.trim() || agentStatus !== "idle" || isDailyQuotaLocked) return;
     onSend(input.trim());
     setInput("");
   };
@@ -211,7 +229,7 @@ const ChatArea = ({ conversation, onSend, onRetry, agentStatus, onOpenSidebar }:
                         {msg.id === lastAssistantMessageId && (
                           <button
                             onClick={() => onRetry(msg.id)}
-                            disabled={agentStatus !== "idle"}
+                            disabled={agentStatus !== "idle" || isDailyQuotaLocked}
                             className="flex items-center gap-1 rounded-md px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             aria-label="Retry assistant response"
                           >
@@ -243,19 +261,33 @@ const ChatArea = ({ conversation, onSend, onRetry, agentStatus, onOpenSidebar }:
         style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.75rem)" }}
       >
         <div className="mx-auto max-w-2xl">
-          <div className="flex items-end gap-2 rounded-xl border border-input bg-card p-2 shadow-sm transition-shadow focus-within:ring-1 focus-within:ring-ring">
+          {isDailyQuotaLocked && (
+            <div className="mb-2 rounded-md border border-amber-300/60 bg-amber-100/70 px-3 py-1.5 text-[11px] leading-5 text-amber-950">
+              Daily quota reached. Chat unlocks in {formatQuotaTimer(dailyQuotaRemainingSeconds)}.
+            </div>
+          )}
+          <div
+            className={`flex items-end gap-2 rounded-xl border border-input p-2 shadow-sm transition-shadow ${
+              isDailyQuotaLocked
+                ? "bg-muted/70 opacity-70"
+                : "bg-card focus-within:ring-1 focus-within:ring-ring"
+            }`}
+          >
             <textarea
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Message..."
+              placeholder={
+                isDailyQuotaLocked ? "Daily quota reached. Please wait for the reset." : "Message..."
+              }
               rows={1}
-              className="flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-foreground placeholder:text-muted-foreground focus:outline-none sm:text-sm"
+              disabled={isDailyQuotaLocked}
+              className="flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-foreground placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed sm:text-sm"
             />
             <button
               onClick={handleSubmit}
-              disabled={!input.trim() || agentStatus !== "idle"}
+              disabled={!input.trim() || agentStatus !== "idle" || isDailyQuotaLocked}
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-30 sm:h-8 sm:w-8"
             >
               <Send size={15} />

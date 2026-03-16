@@ -2,11 +2,62 @@ import { CHAT_STREAM_URL } from "@/lib/api";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
+export class ChatStreamError extends Error {
+  status: number;
+  code: "daily_quota" | "usage_limit" | "request_failed";
+  retryAfterSeconds: number | null;
+
+  constructor({
+    message,
+    status,
+    code,
+    retryAfterSeconds = null,
+  }: {
+    message: string;
+    status: number;
+    code: "daily_quota" | "usage_limit" | "request_failed";
+    retryAfterSeconds?: number | null;
+  }) {
+    super(message);
+    this.name = "ChatStreamError";
+    this.status = status;
+    this.code = code;
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
 export type StreamStatus =
   | "thinking"
   | "retrieving_documents"
   | "retrieval_timeout"
   | "retrieval_failed";
+
+const parseErrorMessage = async (response: Response): Promise<string> => {
+  const text = await response.text();
+  if (!text) {
+    return `Request failed with status ${response.status}.`;
+  }
+
+  try {
+    const payload = JSON.parse(text);
+    if (typeof payload?.detail === "string") return payload.detail;
+  } catch {
+    return text;
+  }
+
+  return `Request failed with status ${response.status}.`;
+};
+
+const parseRetryAfterSeconds = (value: string | null): number | null => {
+  if (!value) return null;
+
+  const seconds = Number.parseInt(value, 10);
+  if (Number.isNaN(seconds) || seconds < 0) {
+    return null;
+  }
+
+  return seconds;
+};
 
 const handleParsedPayload = (
   parsed: any,
@@ -54,9 +105,30 @@ export async function streamChat({
     body: JSON.stringify({ messages, thread_id: threadId }),
   });
 
-  if (resp.status === 429) throw new Error("Rate limited — please try again later.");
-  if (resp.status === 402) throw new Error("Usage limit reached — please add credits.");
-  if (!resp.ok || !resp.body) throw new Error("Failed to get a response.");
+  if (resp.status === 429) {
+    throw new ChatStreamError({
+      message: await parseErrorMessage(resp),
+      status: resp.status,
+      code: "daily_quota",
+      retryAfterSeconds: parseRetryAfterSeconds(resp.headers.get("Retry-After")),
+    });
+  }
+
+  if (resp.status === 402) {
+    throw new ChatStreamError({
+      message: await parseErrorMessage(resp),
+      status: resp.status,
+      code: "usage_limit",
+    });
+  }
+
+  if (!resp.ok || !resp.body) {
+    throw new ChatStreamError({
+      message: await parseErrorMessage(resp),
+      status: resp.status,
+      code: "request_failed",
+    });
+  }
 
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();

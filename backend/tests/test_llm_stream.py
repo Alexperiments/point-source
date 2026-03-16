@@ -16,6 +16,12 @@ class _FakeRedis:
     def __init__(self) -> None:
         self._values: dict[str, int] = {}
 
+    async def get(self, key: str) -> str | None:
+        value = self._values.get(key)
+        if value is None:
+            return None
+        return str(value)
+
     async def incr(self, key: str) -> int:
         value = self._values.get(key, 0) + 1
         self._values[key] = value
@@ -169,6 +175,7 @@ async def test_chat_stream_enforces_daily_limit_except_for_premium_users(
     assert regular_first.status_code == 200
     assert regular_second.status_code == 429
     assert "Daily message limit reached (1)" in regular_second.json()["detail"]
+    assert regular_second.headers.get("Retry-After") is not None
 
     assert premium_first.status_code == 200
     assert premium_second.status_code == 200

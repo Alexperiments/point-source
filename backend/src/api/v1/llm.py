@@ -157,6 +157,21 @@ async def _load_thread_message_history(
     return history
 
 
+async def _daily_quota_headers(
+    llm_service: LLMService,
+    current_user: User,
+) -> dict[str, str]:
+    """Build rate-limit headers for daily quota responses."""
+    try:
+        usage = await llm_service.get_daily_message_usage(current_user)
+    except LLMServiceError:
+        return {}
+
+    return {
+        "Retry-After": str(usage.reset_in_seconds),
+    }
+
+
 @router.post("/chat", response_model=LLMResponse)
 async def chat(
     request: LLMRequest,
@@ -177,6 +192,7 @@ async def chat(
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=str(e),
+            headers=await _daily_quota_headers(llm_service, current_user),
         ) from e
     except LLMServiceError as e:
         raise HTTPException(
@@ -217,6 +233,7 @@ async def chat_stream(
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=str(e),
+            headers=await _daily_quota_headers(llm_service, current_user),
         ) from e
     except Exception:
         await redis.aclose()

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatArea from "@/components/ChatArea";
-import { streamChat } from "@/lib/StreamChat";
+import { ChatStreamError, streamChat } from "@/lib/StreamChat";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -11,6 +11,7 @@ import {
   listThreads,
   type ThreadPayload,
 } from "@/lib/ThreadsApi";
+import { AUTH_BASE_URL } from "@/lib/api";
 
 export interface ChatMessage {
   id: string;
@@ -42,6 +43,61 @@ const toConversation = (thread: ThreadPayload): Conversation => ({
     })),
 });
 
+type UsageSummary = {
+  isPremium: boolean;
+  requestsRemaining: number | null;
+  resetInSeconds: number;
+};
+
+const parseUsageSummary = (payload: unknown): UsageSummary => {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Invalid usage payload from server.");
+  }
+
+  const raw = payload as Record<string, unknown>;
+  const isPremium = raw.is_premium;
+  const requestsRemaining = raw.requests_remaining;
+  const resetInSeconds = raw.reset_in_seconds;
+
+  if (
+    typeof isPremium !== "boolean" ||
+    (requestsRemaining !== null && typeof requestsRemaining !== "number") ||
+    typeof resetInSeconds !== "number"
+  ) {
+    throw new Error("Unexpected usage payload from server.");
+  }
+
+  return {
+    isPremium,
+    requestsRemaining,
+    resetInSeconds,
+  };
+};
+
+const fetchUsageSummary = async (): Promise<UsageSummary> => {
+  const response = await fetch(`${AUTH_BASE_URL}/users/me/usage`, {
+    method: "GET",
+    credentials: "include",
+  });
+
+  const text = await response.text();
+  let payload: unknown = null;
+
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = text;
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to load usage with status ${response.status}.`);
+  }
+
+  return parseUsageSummary(payload);
+};
+
 const Index = () => {
   const { user, isLoading } = useAuth();
   const isMobile = useIsMobile();
@@ -52,6 +108,7 @@ const Index = () => {
   );
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
   const [loginPromptVersion, setLoginPromptVersion] = useState(0);
+  const [dailyQuotaRemainingSeconds, setDailyQuotaRemainingSeconds] = useState<number | null>(null);
 
   const activeConversation = conversations.find((c) => c.id === activeId) ?? null;
 
@@ -67,6 +124,7 @@ const Index = () => {
       setConversations([]);
       setActiveId(null);
       setAgentStatus("idle");
+      setDailyQuotaRemainingSeconds(null);
       return;
     }
 
@@ -98,6 +156,54 @@ const Index = () => {
       cancelled = true;
     };
   }, [isLoading, user]);
+
+  useEffect(() => {
+    if (isLoading || !user) return;
+
+    let cancelled = false;
+
+    const loadUsage = async () => {
+      try {
+        const usage = await fetchUsageSummary();
+        if (cancelled) return;
+
+        if (!usage.isPremium && usage.requestsRemaining === 0) {
+          setDailyQuotaRemainingSeconds(Math.max(1, usage.resetInSeconds));
+          return;
+        }
+
+        setDailyQuotaRemainingSeconds(null);
+      } catch {
+        if (!cancelled) {
+          setDailyQuotaRemainingSeconds(null);
+        }
+      }
+    };
+
+    void loadUsage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoading, user]);
+
+  useEffect(() => {
+    if (dailyQuotaRemainingSeconds === null) return;
+    if (dailyQuotaRemainingSeconds <= 0) {
+      setDailyQuotaRemainingSeconds(null);
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setDailyQuotaRemainingSeconds((current) =>
+        current === null ? null : Math.max(0, current - 1)
+      );
+    }, 1000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [dailyQuotaRemainingSeconds]);
 
   const createConversation = () => {
     setActiveId(null);
@@ -223,6 +329,11 @@ const Index = () => {
       });
     } catch (e: any) {
       setAgentStatus("idle");
+      if (e instanceof ChatStreamError && e.code === "daily_quota") {
+        setDailyQuotaRemainingSeconds(Math.max(1, e.retryAfterSeconds ?? 1));
+        return;
+      }
+
       toast.error(e.message || "Failed to get response");
     }
   };
@@ -278,6 +389,7 @@ const Index = () => {
         onRetry={retryAssistantMessage}
         agentStatus={agentStatus}
         onOpenSidebar={() => setSidebarOpen(true)}
+        dailyQuotaRemainingSeconds={dailyQuotaRemainingSeconds}
       />
     </div>
   );
