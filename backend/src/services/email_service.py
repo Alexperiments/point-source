@@ -71,13 +71,14 @@ class PostmarkEmailService(BaseEmailService):
             "From": f"{self.from_name} <{self.from_address}>",
             "To": message.to_email,
             "Subject": message.subject,
-            "TextBody": message.text_body,
             "MessageStream": self.message_stream,
             "TrackLinks": "None",
             "TrackOpens": False,
         }
         if message.html_body:
             payload["HtmlBody"] = message.html_body
+        else:
+            payload["TextBody"] = message.text_body
         if message.tag:
             payload["Tag"] = message.tag
 
