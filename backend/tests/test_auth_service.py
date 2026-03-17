@@ -352,6 +352,31 @@ async def test_verify_email_marks_user_as_verified(
 
 
 @pytest.mark.asyncio
+async def test_verify_email_is_idempotent_for_already_verified_user(
+    db_session: AsyncSession,
+    fake_email_service,
+) -> None:
+    """Submitting the same verify link twice should still be safe."""
+    auth_service = AuthService(db_session, email_service=fake_email_service)
+    await auth_service.register_user(
+        UserCreate(
+            name="Verify User",
+            email="verify-twice@example.com",
+            password=SecretStr("SecurePass123"),
+        )
+    )
+
+    message = fake_email_service.messages[0]
+    raw_token = message.text_body.split("token=")[1].split()[0]
+
+    first_user = await auth_service.verify_email(raw_token)
+    second_user = await auth_service.verify_email(raw_token)
+
+    assert first_user.id == second_user.id
+    assert second_user.email_verified is True
+
+
+@pytest.mark.asyncio
 async def test_reset_password_marks_token_as_one_time_use(
     db_session: AsyncSession,
     fake_email_service,

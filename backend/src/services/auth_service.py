@@ -333,6 +333,26 @@ class AuthService:
 
     async def verify_email(self, raw_token: str) -> User:
         """Consume a verification token and mark the user email as verified."""
+        token_hash = self._hash_action_token(raw_token)
+        result = await self.session.execute(
+            select(EmailActionToken).where(
+                EmailActionToken.token_hash == token_hash,
+                EmailActionToken.purpose == EMAIL_VERIFICATION_PURPOSE,
+            ),
+        )
+        token = result.scalar_one_or_none()
+        if token is None:
+            raise EmailActionTokenError("Token is invalid or has expired.")
+
+        user = await self.user_service.get_user_by_id(token.user_id)
+        if (
+            user is not None
+            and not user.is_deleted
+            and user.email_verified
+            and user.email == token.email
+        ):
+            return user
+
         token, user = await self._get_valid_email_action_token(
             raw_token,
             EMAIL_VERIFICATION_PURPOSE,
