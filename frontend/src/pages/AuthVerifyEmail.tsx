@@ -3,44 +3,49 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/context/useAuth";
 import { getErrorMessage } from "@/lib/errors";
 
-type Status = "loading" | "success" | "error";
+type Status = "idle" | "loading" | "success" | "error";
 
 const AuthVerifyEmail = () => {
   const { verifyEmail } = useAuth();
   const [searchParams] = useSearchParams();
-  const [status, setStatus] = useState<Status>("loading");
-  const [message, setMessage] = useState("Verifying your email...");
+  const [token, setToken] = useState("");
+  const [status, setStatus] = useState<Status>("idle");
+  const [message, setMessage] = useState(
+    "Confirm your email address to activate your Point-source account."
+  );
 
   useEffect(() => {
-    const token = searchParams.get("token")?.trim() || "";
+    const nextToken = searchParams.get("token")?.trim() || "";
 
+    if (!nextToken) {
+      setStatus("error");
+      setMessage("The verification link is missing a token.");
+      return;
+    }
+    setToken(nextToken);
+    setStatus("idle");
+    setMessage("Confirm your email address to activate your Point-source account.");
+  }, [searchParams]);
+
+  const submitVerification = async () => {
     if (!token) {
       setStatus("error");
       setMessage("The verification link is missing a token.");
       return;
     }
 
-    let cancelled = false;
+    setStatus("loading");
+    setMessage("Verifying your email...");
 
-    const run = async () => {
-      try {
-        const responseMessage = await verifyEmail(token);
-        if (cancelled) return;
-        setStatus("success");
-        setMessage(responseMessage);
-      } catch (error: unknown) {
-        if (cancelled) return;
-        setStatus("error");
-        setMessage(getErrorMessage(error) || "Could not verify this email link.");
-      }
-    };
-
-    void run();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [searchParams, verifyEmail]);
+    try {
+      const responseMessage = await verifyEmail(token);
+      setStatus("success");
+      setMessage(responseMessage);
+    } catch (error: unknown) {
+      setStatus("error");
+      setMessage(getErrorMessage(error) || "Could not verify this email link.");
+    }
+  };
 
   return (
     <main className="min-h-screen bg-background px-4 py-16 text-foreground">
@@ -57,12 +62,23 @@ const AuthVerifyEmail = () => {
         </h1>
         <p className="mt-4 text-sm leading-6 text-muted-foreground">{message}</p>
         <div className="mt-8 flex flex-wrap gap-3">
-          <Link
-            to="/"
-            className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-          >
-            Return home
-          </Link>
+          {status !== "success" && token ? (
+            <button
+              type="button"
+              onClick={() => void submitVerification()}
+              disabled={status === "loading"}
+              className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {status === "loading" ? "Verifying..." : "Verify email"}
+            </button>
+          ) : (
+            <Link
+              to="/"
+              className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+            >
+              Return home
+            </Link>
+          )}
           {status !== "loading" && (
             <Link
               to="/auth/reset-password"
