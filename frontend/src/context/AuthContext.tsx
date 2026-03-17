@@ -1,6 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { AUTH_BASE_URL } from "@/lib/api";
-import { AuthContext, type AuthUser } from "@/context/auth-context";
+import {
+  AuthContext,
+  type AuthUser,
+  type LoginInput,
+  type ProfileUpdateInput,
+  type RegisterInput,
+} from "@/context/auth-context";
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
@@ -62,17 +68,23 @@ const parseUser = (payload: unknown): AuthUser => {
 
   const id = raw.id;
   const email = raw.email;
+  const emailVerified = raw.email_verified;
   const name =
     raw.name ||
     raw.full_name ||
     raw.username ||
     raw.display_name;
 
-  if (typeof id !== "string" || typeof email !== "string" || typeof name !== "string") {
+  if (
+    typeof id !== "string" ||
+    typeof email !== "string" ||
+    typeof name !== "string" ||
+    typeof emailVerified !== "boolean"
+  ) {
     throw new Error("Unexpected user payload from server.");
   }
 
-  return { id, email, name };
+  return { id, email, name, emailVerified };
 };
 
 const fetchCurrentUser = async () => {
@@ -144,7 +156,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       throw new Error("All fields are required.");
     }
 
-    await requestJson(`${AUTH_BASE_URL}/register`, {
+    await requestJson<Record<string, unknown>>(`${AUTH_BASE_URL}/register`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -155,11 +167,98 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         password: trimmedPassword,
       }),
     });
+  };
 
-    await login({
-      email: normalizedEmail,
-      password: trimmedPassword,
+  const resendVerification = async (email: string) => {
+    const normalizedEmail = normalizeEmail(email);
+
+    if (!normalizedEmail) {
+      throw new Error("Email is required.");
+    }
+
+    await requestJson<Record<string, unknown>>(`${AUTH_BASE_URL}/email/verify/request`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email: normalizedEmail,
+      }),
     });
+  };
+
+  const requestPasswordReset = async (email: string) => {
+    const normalizedEmail = normalizeEmail(email);
+
+    if (!normalizedEmail) {
+      throw new Error("Email is required.");
+    }
+
+    await requestJson<Record<string, unknown>>(`${AUTH_BASE_URL}/password-reset/request`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email: normalizedEmail,
+      }),
+    });
+  };
+
+  const verifyEmail = async (token: string) => {
+    const trimmedToken = token.trim();
+
+    if (!trimmedToken) {
+      throw new Error("Verification token is required.");
+    }
+
+    const response = await requestJson<{ message?: string }>(`${AUTH_BASE_URL}/email/verify`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        token: trimmedToken,
+      }),
+    });
+
+    return response.message || "Email verified.";
+  };
+
+  const resetPassword = async (
+    token: string,
+    newPassword: string,
+    confirmPassword: string,
+  ) => {
+    const trimmedToken = token.trim();
+    const trimmedPassword = newPassword.trim();
+    const trimmedConfirmPassword = confirmPassword.trim();
+
+    if (!trimmedToken) {
+      throw new Error("Reset token is required.");
+    }
+
+    if (!trimmedPassword || !trimmedConfirmPassword) {
+      throw new Error("Both password fields are required.");
+    }
+
+    const response = await requestJson<{ message?: string }>(
+      `${AUTH_BASE_URL}/password-reset/confirm`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          token: trimmedToken,
+          new_password: trimmedPassword,
+          confirm_password: trimmedConfirmPassword,
+        }),
+      }
+    );
+
+    setUser(null);
+    return response.message || "Password updated.";
   };
 
   const updateProfile = async ({
@@ -224,6 +323,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isLoading,
         login,
         register,
+        resendVerification,
+        requestPasswordReset,
+        verifyEmail,
+        resetPassword,
         updateProfile,
         logout,
       }}

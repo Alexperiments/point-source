@@ -48,6 +48,11 @@ class UserService:
         """
         self.session = session
 
+    @staticmethod
+    def normalize_email(email: str) -> str:
+        """Trim and lowercase email addresses before persistence or lookup."""
+        return email.strip().lower()
+
     async def create_user(self, user_data: UserCreate) -> User:
         """Create a new user.
 
@@ -61,17 +66,19 @@ class UserService:
             ValueError: If the email already exists.
 
         """
-        existing_user = await self.get_user_by_email(user_data.email)
+        normalized_email = self.normalize_email(user_data.email)
+        existing_user = await self.get_user_by_email(normalized_email)
         if existing_user:
-            msg = f"User with email {user_data.email} already exists"
+            msg = f"User with email {normalized_email} already exists"
             raise UserAlreadyExistsError(msg)
 
         hashed_password = hash_password(user_data.password.get_secret_value())
 
         user = User(
             name=user_data.name,
-            email=user_data.email,
+            email=normalized_email,
             hashed_password=hashed_password,
+            email_verified=False,
         )
 
         try:
@@ -116,7 +123,8 @@ class UserService:
             The user if found, None otherwise.
 
         """
-        query = select(User).where(User.email == email)
+        normalized_email = self.normalize_email(email)
+        query = select(User).where(User.email == normalized_email)
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
@@ -143,16 +151,20 @@ class UserService:
             msg = f"User with ID {user_id} not found"
             raise UserNotFoundError(msg)
 
-        if user_data.email and user_data.email != user.email:
-            existing_user = await self.get_user_by_email(user_data.email)
+        normalized_email = None
+        if user_data.email is not None:
+            normalized_email = self.normalize_email(user_data.email)
+
+        if normalized_email and normalized_email != user.email:
+            existing_user = await self.get_user_by_email(normalized_email)
             if existing_user:
-                msg = f"User with email {user_data.email} already exists"
+                msg = f"User with email {normalized_email} already exists"
                 raise UserAlreadyExistsError(msg)
 
         if user_data.name is not None:
             user.name = user_data.name
-        if user_data.email is not None:
-            user.email = user_data.email
+        if normalized_email is not None:
+            user.email = normalized_email
         if user_data.is_superuser is not None:
             user.is_superuser = user_data.is_superuser
 

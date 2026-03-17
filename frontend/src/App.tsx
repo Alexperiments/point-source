@@ -6,6 +6,8 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import Profile from "./pages/Profile";
 import About from "./pages/About";
+import AuthVerifyEmail from "./pages/AuthVerifyEmail";
+import AuthResetPassword from "./pages/AuthResetPassword";
 
 const queryClient = new QueryClient();
 
@@ -18,6 +20,8 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/about" element={<About />} />
+          <Route path="/auth/verify-email" element={<AuthVerifyEmail />} />
+          <Route path="/auth/reset-password" element={<AuthResetPassword />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

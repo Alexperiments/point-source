@@ -19,8 +19,13 @@ from src.core.security import (
 )
 from src.models.user import User
 from src.schemas.user import (
+    ActionMessageResponse,
+    EmailRequest,
+    EmailTokenRequest,
+    PasswordResetConfirmRequest,
     ProfileUpdateRequest,
     ProfileUpdateResponse,
+    RegistrationResponse,
     Token,
     TokenValidationResponse,
     UserCreate,
@@ -31,8 +36,15 @@ from src.schemas.user import (
 )
 from src.services.auth_service import (
     AuthService,
+    EmailActionTokenError,
+    EmailNotVerifiedError,
     InvalidCredentialsError,
     TokenValidationError,
+)
+from src.services.email_service import (
+    BaseEmailService,
+    EmailDeliveryError,
+    create_email_service,
 )
 from src.services.llm_service import LLMService
 from src.services.user_service import UserAlreadyExistsError, UserService
@@ -48,6 +60,11 @@ async def get_redis() -> AsyncIterator[Redis]:
         yield redis
     finally:
         await redis.aclose()
+
+
+async def get_email_service() -> AsyncIterator[BaseEmailService]:
+    """Get the configured outbound email service."""
+    yield create_email_service()
 
 
 async def get_current_user(
@@ -68,17 +85,96 @@ async def get_current_user(
         raise credentials_exception from e
 
 
-@router.post("/register", response_model=UserResponse)
+@router.post(
+    "/register",
+    response_model=RegistrationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def register(
     user_data: UserCreate,
     db: Annotated[AsyncSession, Depends(get_async_session)],
-) -> User:
-    """Register a new user."""
+    email_service: Annotated[BaseEmailService, Depends(get_email_service)],
+) -> RegistrationResponse:
+    """Register a new user and send an email verification link."""
     try:
-        auth_service = AuthService(db)
-        return await auth_service.register_user(user_data)
+        auth_service = AuthService(db, email_service=email_service)
+        user = await auth_service.register_user(user_data)
     except UserAlreadyExistsError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except EmailDeliveryError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to send verification email right now. Please try again.",
+        ) from e
+    return RegistrationResponse(
+        message="Account created. Check your email to verify your address before logging in.",
+        email=user.email,
+        requires_email_verification=True,
+    )
+
+
+@router.post("/email/verify/request", response_model=ActionMessageResponse)
+async def request_email_verification(
+    payload: EmailRequest,
+    db: Annotated[AsyncSession, Depends(get_async_session)],
+    email_service: Annotated[BaseEmailService, Depends(get_email_service)],
+) -> ActionMessageResponse:
+    """Resend the email verification link if the account is not verified."""
+    auth_service = AuthService(db, email_service=email_service)
+    await auth_service.resend_verification_email(payload.email)
+    return ActionMessageResponse(
+        message="If that email can be verified, a verification link has been sent.",
+    )
+
+
+@router.post("/email/verify", response_model=ActionMessageResponse)
+async def verify_email(
+    payload: EmailTokenRequest,
+    db: Annotated[AsyncSession, Depends(get_async_session)],
+) -> ActionMessageResponse:
+    """Consume an email verification token."""
+    auth_service = AuthService(db)
+    try:
+        await auth_service.verify_email(payload.token)
+    except EmailActionTokenError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return ActionMessageResponse(
+        message="Email verified. You can now log in to Point-source.",
+    )
+
+
+@router.post("/password-reset/request", response_model=ActionMessageResponse)
+async def request_password_reset(
+    payload: EmailRequest,
+    db: Annotated[AsyncSession, Depends(get_async_session)],
+    email_service: Annotated[BaseEmailService, Depends(get_email_service)],
+) -> ActionMessageResponse:
+    """Send a password reset email without exposing account existence."""
+    auth_service = AuthService(db, email_service=email_service)
+    await auth_service.request_password_reset(payload.email)
+    return ActionMessageResponse(
+        message="If that email exists, a password reset link has been sent.",
+    )
+
+
+@router.post("/password-reset/confirm", response_model=ActionMessageResponse)
+async def confirm_password_reset(
+    payload: PasswordResetConfirmRequest,
+    db: Annotated[AsyncSession, Depends(get_async_session)],
+    redis: Annotated[Redis, Depends(get_redis)],
+) -> ActionMessageResponse:
+    """Consume a password reset token and rotate the user's password."""
+    auth_service = AuthService(db, redis=redis)
+    try:
+        await auth_service.reset_password(
+            payload.token,
+            payload.new_password.get_secret_value(),
+        )
+    except EmailActionTokenError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return ActionMessageResponse(
+        message="Password updated. You can now log in with your new password.",
+    )
 
 
 @router.post("/token", response_model=Token)
@@ -93,6 +189,8 @@ async def login(
         auth_service = AuthService(db, redis)
         token = await auth_service.login(user_data)
         set_auth_cookie(response, token.access_token)
+    except EmailNotVerifiedError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
     except InvalidCredentialsError as e:
         raise HTTPException(
             status_code=401,

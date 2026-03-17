@@ -11,9 +11,10 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import StaticPool
 
-from src.api.v1.auth import get_redis as get_auth_redis
+from src.api.v1.auth import get_email_service, get_redis as get_auth_redis
 from src.core.database.base import Base, get_async_session
 from src.main import app
+from src.services.email_service import EmailMessage
 
 
 # Use in-memory SQLite for testing
@@ -40,6 +41,16 @@ class _FakeRedis:
 
     async def aclose(self) -> None:
         return None
+
+
+class _FakeEmailService:
+    """Collect outbound emails for assertions in tests."""
+
+    def __init__(self) -> None:
+        self.messages: list[EmailMessage] = []
+
+    async def send(self, message: EmailMessage) -> None:
+        self.messages.append(message)
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -81,8 +92,15 @@ async def db_session(
 
 
 @pytest_asyncio.fixture(scope="function")
+async def fake_email_service() -> _FakeEmailService:
+    """Create an in-memory email sink for auth-related tests."""
+    return _FakeEmailService()
+
+
+@pytest_asyncio.fixture(scope="function")
 async def client(
     db_session: AsyncSession,
+    fake_email_service: _FakeEmailService,
 ) -> AsyncGenerator[AsyncClient, None]:
     """Create a test client with database session override."""
 
@@ -95,8 +113,12 @@ async def client(
         yield redis
         await redis.aclose()
 
+    async def override_email_service() -> AsyncGenerator[_FakeEmailService, None]:
+        yield fake_email_service
+
     app.dependency_overrides[get_async_session] = override_get_session
     app.dependency_overrides[get_auth_redis] = override_auth_redis
+    app.dependency_overrides[get_email_service] = override_email_service
 
     async with AsyncClient(
         transport=ASGITransport(app=app),

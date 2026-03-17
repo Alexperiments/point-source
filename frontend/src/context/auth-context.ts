@@ -4,20 +4,21 @@ export type AuthUser = {
   id: string;
   name: string;
   email: string;
+  emailVerified: boolean;
 };
 
-type LoginInput = {
+export type LoginInput = {
   email: string;
   password: string;
 };
 
-type RegisterInput = {
+export type RegisterInput = {
   name: string;
   email: string;
   password: string;
 };
 
-type ProfileUpdateInput = {
+export type ProfileUpdateInput = {
   name: string;
   email?: string;
   currentPassword?: string;
@@ -30,6 +31,10 @@ export type AuthContextValue = {
   isLoading: boolean;
   login: (input: LoginInput) => Promise<void>;
   register: (input: RegisterInput) => Promise<void>;
+  resendVerification: (email: string) => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<void>;
+  verifyEmail: (token: string) => Promise<string>;
+  resetPassword: (token: string, newPassword: string, confirmPassword: string) => Promise<string>;
   updateProfile: (input: ProfileUpdateInput) => Promise<void>;
   logout: () => Promise<void>;
 };

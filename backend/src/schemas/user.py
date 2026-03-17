@@ -11,6 +11,7 @@ from pydantic import (
     EmailStr,
     Field,
     SecretStr,
+    model_validator,
 )
 
 
@@ -99,6 +100,14 @@ class UserResponse(UserBase):
         ...,
         description="Whether the user is a premium user",
     )
+    email_verified: bool = Field(
+        ...,
+        description="Whether the user has verified ownership of their email address",
+    )
+    email_verified_at: datetime | None = Field(
+        None,
+        description="Timestamp when the email address was verified",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -135,6 +144,58 @@ class TokenValidationResponse(BaseModel):
         ...,
         description="The user ID associated with the token",
     )
+
+
+class ActionMessageResponse(BaseModel):
+    """Generic message response for non-authenticating auth flows."""
+
+    message: str = Field(..., description="Human-readable status message")
+
+
+class RegistrationResponse(ActionMessageResponse):
+    """Response returned after account creation starts email verification."""
+
+    email: EmailStr = Field(..., description="Registered email address")
+    requires_email_verification: bool = Field(
+        default=True,
+        description="Whether the account must verify its email before login",
+    )
+
+
+class EmailRequest(BaseModel):
+    """Single email address request payload."""
+
+    email: EmailStr = Field(..., description="User email address")
+
+
+class EmailTokenRequest(BaseModel):
+    """Single one-time token request payload."""
+
+    token: str = Field(..., min_length=20, description="One-time email action token")
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    """Password reset confirmation payload."""
+
+    token: str = Field(..., min_length=20, description="One-time password reset token")
+    new_password: PasswordStr = Field(
+        ...,
+        max_length=100,
+        description="New password",
+    )
+    confirm_password: str = Field(
+        ...,
+        max_length=100,
+        description="Confirmation of the new password",
+    )
+
+    @model_validator(mode="after")
+    def validate_password_match(self) -> "PasswordResetConfirmRequest":
+        """Require explicit password confirmation."""
+        if self.new_password.get_secret_value() != self.confirm_password:
+            msg = "New passwords do not match."
+            raise ValueError(msg)
+        return self
 
 
 class ProfileUpdateRequest(BaseModel):

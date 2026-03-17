@@ -13,6 +13,8 @@ from src.models.user import User
 from src.schemas.user import UserCreate, UserLogin
 from src.services.auth_service import (
     AuthService,
+    EmailActionTokenError,
+    EmailNotVerifiedError,
     InvalidCredentialsError,
     TokenValidationError,
 )
@@ -37,9 +39,12 @@ class _FakeRedis:
 
 
 @pytest.mark.asyncio
-async def test_register_user_success(db_session: AsyncSession) -> None:
+async def test_register_user_success(
+    db_session: AsyncSession,
+    fake_email_service,
+) -> None:
     """Test successful user registration."""
-    auth_service = AuthService(db_session)
+    auth_service = AuthService(db_session, email_service=fake_email_service)
 
     user_data = UserCreate(
         name="Test User",
@@ -53,12 +58,17 @@ async def test_register_user_success(db_session: AsyncSession) -> None:
     assert user.name == "Test User"
     assert user.email == "test@example.com"
     assert user.is_deleted is False
+    assert user.email_verified is False
+    assert len(fake_email_service.messages) == 1
 
 
 @pytest.mark.asyncio
-async def test_register_user_duplicate_email(db_session: AsyncSession) -> None:
+async def test_register_user_duplicate_email(
+    db_session: AsyncSession,
+    fake_email_service,
+) -> None:
     """Test registration with duplicate email raises error."""
-    auth_service = AuthService(db_session)
+    auth_service = AuthService(db_session, email_service=fake_email_service)
 
     user_data = UserCreate(
         name="Test User",
@@ -163,6 +173,30 @@ async def test_authenticate_user_deleted_user_fails(
         await auth_service.authenticate_user(
             UserLogin(
                 email="deleted@example.com",
+                password=SecretStr("SecurePass123"),
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_authenticate_user_unverified_user_fails(
+    db_session: AsyncSession,
+) -> None:
+    """Unverified users must not receive login sessions."""
+    auth_service = AuthService(db_session)
+    user = User(
+        name="Pending User",
+        email="pending@example.com",
+        hashed_password=hash_password("SecurePass123"),
+        email_verified=False,
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    with pytest.raises(EmailNotVerifiedError):
+        await auth_service.authenticate_user(
+            UserLogin(
+                email="pending@example.com",
                 password=SecretStr("SecurePass123"),
             ),
         )
@@ -290,6 +324,56 @@ async def test_login_invalid_credentials(db_session: AsyncSession) -> None:
 
     with pytest.raises(InvalidCredentialsError):
         await auth_service.login(user_data)
+
+
+@pytest.mark.asyncio
+async def test_verify_email_marks_user_as_verified(
+    db_session: AsyncSession,
+    fake_email_service,
+) -> None:
+    """Verification should mark the account as active for login."""
+    auth_service = AuthService(db_session, email_service=fake_email_service)
+    user = await auth_service.register_user(
+        UserCreate(
+            name="Verify User",
+            email="verify@example.com",
+            password=SecretStr("SecurePass123"),
+        )
+    )
+
+    message = fake_email_service.messages[0]
+    raw_token = message.text_body.split("token=")[1].split()[0]
+
+    verified_user = await auth_service.verify_email(raw_token)
+
+    assert verified_user.id == user.id
+    assert verified_user.email_verified is True
+    assert verified_user.email_verified_at is not None
+
+
+@pytest.mark.asyncio
+async def test_reset_password_marks_token_as_one_time_use(
+    db_session: AsyncSession,
+    fake_email_service,
+) -> None:
+    """Password reset tokens should be invalid after first successful use."""
+    auth_service = AuthService(db_session, email_service=fake_email_service)
+    user = await auth_service.register_user(
+        UserCreate(
+            name="Reset User",
+            email="reset@example.com",
+            password=SecretStr("SecurePass123"),
+        )
+    )
+    await auth_service.request_password_reset(user.email)
+
+    reset_message = fake_email_service.messages[-1]
+    raw_token = reset_message.text_body.split("token=")[1].split()[0]
+
+    await auth_service.reset_password(raw_token, "NewSecurePass456")
+
+    with pytest.raises(EmailActionTokenError):
+        await auth_service.reset_password(raw_token, "AnotherPass789")
 
 
 @pytest.mark.asyncio

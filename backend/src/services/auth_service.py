@@ -1,20 +1,32 @@
 """Auth service."""
 
+import hashlib
+import secrets
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
+from urllib.parse import urlencode
 
 from jose import JWTError, jwt
+from loguru import logger
 from redis.asyncio import Redis
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
-from src.core.security import create_access_token, oauth2_scheme
+from src.core.security import create_access_token, hash_password, oauth2_scheme
+from src.models.email_action_token import EmailActionToken
 from src.models.user import User
 from src.schemas.user import Token, UserCreate, UserLogin
-from src.services.user_service import (
-    UserService,
-    UserServiceError,
+from src.services.email_service import (
+    BaseEmailService,
+    EmailDeliveryError,
+    EmailMessage,
 )
+from src.services.user_service import UserService
+
+
+EMAIL_VERIFICATION_PURPOSE = "verify_email"
+PASSWORD_RESET_PURPOSE = "reset_password"  # noqa: S105
 
 
 class AuthServiceError(Exception):
@@ -25,8 +37,16 @@ class InvalidCredentialsError(AuthServiceError):
     """Exception for invalid credentials errors."""
 
 
+class EmailNotVerifiedError(AuthServiceError):
+    """Raised when a user has not yet verified their email address."""
+
+
 class TokenValidationError(AuthServiceError):
     """Exception for token validation errors."""
+
+
+class EmailActionTokenError(AuthServiceError):
+    """Raised when an email action token is invalid or expired."""
 
 
 class AuthService:
@@ -36,21 +56,38 @@ class AuthService:
         self,
         session: AsyncSession,
         redis: Redis | None = None,
+        email_service: BaseEmailService | None = None,
     ) -> None:
-        """Initialize the auth service.
-
-        Args:
-            session: The database session to use.
-            redis: Optional Redis client used for token revocation/versioning.
-
-        """
+        """Initialize the auth service."""
         self.session = session
         self.redis = redis
+        self.email_service = email_service
         self.user_service = UserService(session)
 
     @staticmethod
     def _token_version_key(user_id: uuid.UUID) -> str:
         return f"auth:token_version:{user_id}"
+
+    @staticmethod
+    def _hash_action_token(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _format_expiration_window(
+        *,
+        hours: int | None = None,
+        minutes: int | None = None,
+    ) -> str:
+        if hours is not None:
+            return f"{hours} hour{'s' if hours != 1 else ''}"
+        if minutes is not None:
+            return f"{minutes} minute{'s' if minutes != 1 else ''}"
+        return "a limited time"
+
+    def _build_frontend_link(self, path: str, token: str) -> str:
+        base_url = str(settings.frontend_base_url).rstrip("/")
+        query = urlencode({"token": token})
+        return f"{base_url}{path}?{query}"
 
     async def _get_token_version(self, user_id: uuid.UUID) -> int:
         if self.redis is None:
@@ -105,7 +142,6 @@ class AuthService:
         try:
             user_id = uuid.UUID(str(token_subject))
         except (TypeError, ValueError):
-            # Backward-compatible fallback for legacy tokens using email in `sub`.
             return await self.user_service.get_user_by_email(str(token_subject))
         return await self.user_service.get_user_by_id(user_id)
 
@@ -117,44 +153,243 @@ class AuthService:
         except (TypeError, ValueError):
             raise TokenValidationError("Token version claim is invalid") from None
 
+    async def _invalidate_email_action_tokens(
+        self,
+        user_id: uuid.UUID,
+        purpose: str,
+    ) -> None:
+        now = datetime.now(UTC)
+        await self.session.execute(
+            update(EmailActionToken)
+            .where(
+                EmailActionToken.user_id == user_id,
+                EmailActionToken.purpose == purpose,
+                EmailActionToken.consumed_at.is_(None),
+            )
+            .values(consumed_at=now),
+        )
+
+    async def _create_email_action_token(
+        self,
+        user: User,
+        purpose: str,
+        *,
+        email: str,
+        expires_delta: timedelta,
+    ) -> str:
+        await self._invalidate_email_action_tokens(user.id, purpose)
+
+        raw_token = secrets.token_urlsafe(32)
+        token = EmailActionToken(
+            user_id=user.id,
+            purpose=purpose,
+            token_hash=self._hash_action_token(raw_token),
+            email=email,
+            expires_at=datetime.now(UTC) + expires_delta,
+        )
+        self.session.add(token)
+        await self.session.flush()
+        return raw_token
+
+    async def _get_valid_email_action_token(
+        self,
+        raw_token: str,
+        purpose: str,
+    ) -> tuple[EmailActionToken, User]:
+        token_hash = self._hash_action_token(raw_token)
+        result = await self.session.execute(
+            select(EmailActionToken).where(
+                EmailActionToken.token_hash == token_hash,
+                EmailActionToken.purpose == purpose,
+            ),
+        )
+        token = result.scalar_one_or_none()
+        now = datetime.now(UTC)
+        expires_at = token.expires_at if token is not None else None
+        if expires_at is not None and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if (
+            token is None
+            or token.consumed_at is not None
+            or expires_at is None
+            or expires_at < now
+        ):
+            raise EmailActionTokenError("Token is invalid or has expired.")
+
+        user = await self.user_service.get_user_by_id(token.user_id)
+        if user is None or user.is_deleted or user.email != token.email:
+            raise EmailActionTokenError("Token is invalid or has expired.")
+
+        return token, user
+
+    def _require_email_service(self) -> BaseEmailService:
+        if self.email_service is None:
+            msg = "Email delivery is not configured."
+            raise EmailDeliveryError(msg)
+        return self.email_service
+
+    @staticmethod
+    def _verification_email_message(user: User, verification_link: str) -> EmailMessage:
+        expiration = AuthService._format_expiration_window(
+            hours=settings.email_verification_token_expire_hours,
+        )
+        text_body = (
+            f"Hi {user.name},\n\n"
+            "Confirm your email address to finish creating your Point-source account.\n\n"
+            f"Verify your email: {verification_link}\n\n"
+            f"This link expires in {expiration}.\n"
+            "If you did not create a Point-source account, you can ignore this email.\n"
+        )
+        html_body = (
+            f"<p>Hi {user.name},</p>"
+            "<p>Confirm your email address to finish creating your Point-source account.</p>"
+            f'<p><a href="{verification_link}">Verify your email</a></p>'
+            f"<p>This link expires in {expiration}.</p>"
+            "<p>If you did not create a Point-source account, you can ignore this email.</p>"
+        )
+        return EmailMessage(
+            to_email=user.email,
+            subject="Verify your Point-source email",
+            text_body=text_body,
+            html_body=html_body,
+            tag="verify-email",
+        )
+
+    @staticmethod
+    def _password_reset_email_message(user: User, reset_link: str) -> EmailMessage:
+        expiration = AuthService._format_expiration_window(
+            minutes=settings.password_reset_token_expire_minutes,
+        )
+        text_body = (
+            f"Hi {user.name},\n\n"
+            "We received a request to reset your Point-source password.\n\n"
+            f"Reset your password: {reset_link}\n\n"
+            f"This link expires in {expiration}.\n"
+            "If you did not request a password reset, you can ignore this email.\n"
+        )
+        html_body = (
+            f"<p>Hi {user.name},</p>"
+            "<p>We received a request to reset your Point-source password.</p>"
+            f'<p><a href="{reset_link}">Reset your password</a></p>'
+            f"<p>This link expires in {expiration}.</p>"
+            "<p>If you did not request a password reset, you can ignore this email.</p>"
+        )
+        return EmailMessage(
+            to_email=user.email,
+            subject="Reset your Point-source password",
+            text_body=text_body,
+            html_body=html_body,
+            tag="password-reset",
+        )
+
+    async def _send_verification_email(self, user: User) -> None:
+        raw_token = await self._create_email_action_token(
+            user,
+            EMAIL_VERIFICATION_PURPOSE,
+            email=user.email,
+            expires_delta=timedelta(
+                hours=settings.email_verification_token_expire_hours,
+            ),
+        )
+        verification_link = self._build_frontend_link(
+            "/auth/verify-email",
+            raw_token,
+        )
+        message = self._verification_email_message(user, verification_link)
+        await self._require_email_service().send(message)
+
+    async def _send_password_reset_email(self, user: User) -> None:
+        raw_token = await self._create_email_action_token(
+            user,
+            PASSWORD_RESET_PURPOSE,
+            email=user.email,
+            expires_delta=timedelta(
+                minutes=settings.password_reset_token_expire_minutes,
+            ),
+        )
+        reset_link = self._build_frontend_link("/auth/reset-password", raw_token)
+        message = self._password_reset_email_message(user, reset_link)
+        await self._require_email_service().send(message)
+
     async def register_user(self, user_data: UserCreate) -> User:
-        """Register a new user.
+        """Register a new user and send a verification email."""
+        user = await self.user_service.create_user(user_data)
+        await self._send_verification_email(user)
+        return user
 
-        Args:
-            user_data: The user data to create.
+    async def resend_verification_email(self, email: str) -> None:
+        """Resend the email verification link when the account is unverified."""
+        user = await self.user_service.get_user_by_email(email)
+        if user is None or user.is_deleted or user.email_verified:
+            return
 
-        Returns:
-            The created user.
-
-        Raises:
-            UserAlreadyExistsError: If the email already exists.
-            FailedToCreateUserError: If user creation fails.
-
-        """
         try:
-            return await self.user_service.create_user(user_data)
-        except UserServiceError as e:
-            raise e from e
+            await self._send_verification_email(user)
+        except EmailDeliveryError:
+            logger.exception(
+                "Failed to deliver verification email for user {}",
+                user.id,
+            )
+
+    async def verify_email(self, raw_token: str) -> User:
+        """Consume a verification token and mark the user email as verified."""
+        token, user = await self._get_valid_email_action_token(
+            raw_token,
+            EMAIL_VERIFICATION_PURPOSE,
+        )
+        now = datetime.now(UTC)
+        token.consumed_at = now
+        user.email_verified = True
+        user.email_verified_at = now
+        await self._invalidate_email_action_tokens(user.id, EMAIL_VERIFICATION_PURPOSE)
+        await self.session.flush()
+        return user
+
+    async def request_password_reset(self, email: str) -> None:
+        """Send a password reset link without revealing whether an account exists."""
+        user = await self.user_service.get_user_by_email(email)
+        if user is None or user.is_deleted:
+            return
+
+        try:
+            await self._send_password_reset_email(user)
+        except EmailDeliveryError:
+            logger.exception(
+                "Failed to deliver password reset email for user {}",
+                user.id,
+            )
+
+    async def reset_password(self, raw_token: str, new_password: str) -> User:
+        """Consume a password reset token and rotate the stored password."""
+        token, user = await self._get_valid_email_action_token(
+            raw_token,
+            PASSWORD_RESET_PURPOSE,
+        )
+        now = datetime.now(UTC)
+        token.consumed_at = now
+        user.hashed_password = hash_password(new_password)
+        if not user.email_verified:
+            user.email_verified = True
+            user.email_verified_at = now
+        await self._invalidate_email_action_tokens(user.id, PASSWORD_RESET_PURPOSE)
+        await self._invalidate_email_action_tokens(user.id, EMAIL_VERIFICATION_PURPOSE)
+        await self.session.flush()
+        await self.revoke_user_tokens(user)
+        return user
 
     async def authenticate_user(self, user_data: UserLogin) -> User:
-        """Authenticate a user with email and password.
-
-        Args:
-            user_data: The user login credentials.
-
-        Returns:
-            The authenticated user.
-
-        Raises:
-            InvalidCredentialsError: If credentials are invalid.
-
-        """
+        """Authenticate a user with email and password."""
         user = await self.user_service.verify_user_password(
             user_data.email,
             user_data.password.get_secret_value(),
         )
         if not user or user.is_deleted:
             raise InvalidCredentialsError("Incorrect email or password")
+        if not user.email_verified:
+            raise EmailNotVerifiedError(
+                "Email address not verified. Check your inbox or request another "
+                "verification email.",
+            )
         return user
 
     def create_token(
@@ -164,18 +399,7 @@ class AuthService:
         *,
         token_version: int = 1,
     ) -> Token:
-        """Create an access token for a user.
-
-        Args:
-            user: The user to create a token for.
-            expires_delta: Optional expiration time delta.
-                If None, uses default from settings.
-            token_version: Token version included in the JWT for revocation checks.
-
-        Returns:
-            A Token object with access_token and token_type.
-
-        """
+        """Create an access token for a user."""
         if expires_delta is None:
             expires_delta = timedelta(
                 minutes=settings.access_token_expire_minutes,
@@ -207,18 +431,7 @@ class AuthService:
         )
 
     async def login(self, user_data: UserLogin) -> Token:
-        """Login a user and return an access token.
-
-        Args:
-            user_data: The user login credentials.
-
-        Returns:
-            A Token object with access_token and token_type.
-
-        Raises:
-            InvalidCredentialsError: If credentials are invalid.
-
-        """
+        """Login a user and return an access token."""
         user = await self.authenticate_user(user_data)
         return await self.create_token_for_user(user)
 
@@ -232,19 +445,7 @@ class AuthService:
         return int(await self.redis.incr(key))
 
     async def get_user_from_token(self, token: str) -> User:
-        """Get a user from a JWT token with issuer and audience validation.
-
-        Args:
-            token: The JWT token string.
-
-        Returns:
-            The user associated with the token.
-
-        Raises:
-            TokenValidationError: If the token is invalid,
-                has wrong issuer/audience, or user not found.
-
-        """
+        """Get a user from a JWT token with issuer and audience validation."""
         payload = self._decode_payload(token)
         token_subject = payload.get("sub")
         user = await self._resolve_user_from_subject(token_subject)
@@ -259,15 +460,7 @@ class AuthService:
         return user
 
     async def validate_token(self, token: str) -> tuple[bool, User | None]:
-        """Validate a JWT token and return the user if valid.
-
-        Args:
-            token: The JWT token string.
-
-        Returns:
-            A tuple of (is_valid, user). user is None if token is invalid.
-
-        """
+        """Validate a JWT token and return the user if valid."""
         try:
             return True, await self.get_user_from_token(token)
         except TokenValidationError:

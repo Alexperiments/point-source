@@ -30,6 +30,16 @@ class User(Base):
         default="",
     )
     hashed_password: Mapped[str] = mapped_column(String, nullable=False, default="")
+    email_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        server_default=text("true"),
+        nullable=False,
+        index=True,
+    )
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -1,5 +1,6 @@
 """Tests for authentication endpoints."""
 
+import re
 from datetime import UTC, datetime
 
 import pytest
@@ -11,6 +12,12 @@ from src.core.rag_config import AGENT_SETTINGS
 from src.core.security import AUTH_COOKIE_NAME, hash_password
 from src.main import app
 from src.models.user import User
+
+
+def _extract_token_from_text(text: str) -> str:
+    match = re.search(r"token=([A-Za-z0-9_-]+)", text)
+    assert match is not None
+    return match.group(1)
 
 
 class _UsageRedis:
@@ -39,13 +46,11 @@ async def test_register_success(client: AsyncClient, db_session: AsyncSession) -
 
     response = await client.post("/v1/auth/register", json=user_data)
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     data = response.json()
     assert data["email"] == "test@example.com"
-    assert data["name"] == "Test User"
-    assert "id" in data
-    assert "hashed_password" not in data
-    assert "password" not in data
+    assert data["requires_email_verification"] is True
+    assert "check your email" in data["message"].lower()
 
 
 @pytest.mark.asyncio
@@ -96,6 +101,124 @@ async def test_register_invalid_email(client: AsyncClient) -> None:
     response = await client.post("/v1/auth/register", json=user_data)
 
     assert response.status_code == 422  # Validation error
+
+
+@pytest.mark.asyncio
+async def test_login_unverified_user_fails_after_registration(
+    client: AsyncClient,
+) -> None:
+    """Fresh registrations must verify email before login succeeds."""
+    await client.post(
+        "/v1/auth/register",
+        json={
+            "name": "Test User",
+            "email": "pending@example.com",
+            "password": "SecurePass123",
+        },
+    )
+
+    response = await client.post(
+        "/v1/auth/token",
+        json={
+            "email": "pending@example.com",
+            "password": "SecurePass123",
+        },
+    )
+
+    assert response.status_code == 403
+    assert "not verified" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_verify_email_allows_login(
+    client: AsyncClient,
+    fake_email_service,
+) -> None:
+    """A valid verification link should activate the account."""
+    register_response = await client.post(
+        "/v1/auth/register",
+        json={
+            "name": "Verify User",
+            "email": "verify@example.com",
+            "password": "SecurePass123",
+        },
+    )
+    assert register_response.status_code == 202
+    assert len(fake_email_service.messages) == 1
+
+    token = _extract_token_from_text(fake_email_service.messages[0].text_body)
+
+    verify_response = await client.post(
+        "/v1/auth/email/verify",
+        json={"token": token},
+    )
+    assert verify_response.status_code == 200
+    assert "verified" in verify_response.json()["message"].lower()
+
+    login_response = await client.post(
+        "/v1/auth/token",
+        json={"email": "verify@example.com", "password": "SecurePass123"},
+    )
+    assert login_response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_request_password_reset_is_non_enumerating(
+    client: AsyncClient,
+    fake_email_service,
+) -> None:
+    """Password reset requests should return the same response for missing users."""
+    response = await client.post(
+        "/v1/auth/password-reset/request",
+        json={"email": "missing@example.com"},
+    )
+
+    assert response.status_code == 200
+    assert "if that email exists" in response.json()["message"].lower()
+    assert fake_email_service.messages == []
+
+
+@pytest.mark.asyncio
+async def test_password_reset_confirm_updates_password(
+    client: AsyncClient,
+    fake_email_service,
+) -> None:
+    """The password reset flow should rotate the stored credential."""
+    register_response = await client.post(
+        "/v1/auth/register",
+        json={
+            "name": "Reset User",
+            "email": "reset@example.com",
+            "password": "SecurePass123",
+        },
+    )
+    assert register_response.status_code == 202
+    fake_email_service.messages.clear()
+
+    request_response = await client.post(
+        "/v1/auth/password-reset/request",
+        json={"email": "reset@example.com"},
+    )
+    assert request_response.status_code == 200
+    assert len(fake_email_service.messages) == 1
+
+    token = _extract_token_from_text(fake_email_service.messages[0].text_body)
+
+    confirm_response = await client.post(
+        "/v1/auth/password-reset/confirm",
+        json={
+            "token": token,
+            "new_password": "NewSecurePass456",
+            "confirm_password": "NewSecurePass456",
+        },
+    )
+    assert confirm_response.status_code == 200
+
+    login_response = await client.post(
+        "/v1/auth/token",
+        json={"email": "reset@example.com", "password": "NewSecurePass456"},
+    )
+    assert login_response.status_code == 200
 
 
 @pytest.mark.asyncio

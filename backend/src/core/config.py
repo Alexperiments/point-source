@@ -8,6 +8,7 @@ from typing import Literal, TypedDict, cast
 
 from jwt.algorithms import get_default_algorithms
 from pydantic import (
+    EmailStr,
     Field,
     HttpUrl,
     PostgresDsn,
@@ -121,6 +122,16 @@ class Settings(BaseSettings):
     debug: bool = Field(default=False)
 
     access_token_expire_minutes: int = Field(default=30)
+    frontend_base_url: HttpUrl = Field(default=HttpUrl("http://localhost:8080"))
+    email_delivery_mode: Literal["console", "postmark"] = Field(default="console")
+    email_from_address: EmailStr = Field(
+        default="auth@notify.point-source.org",
+    )
+    email_from_name: str = Field(default="Point-source")
+    postmark_server_token: SecretStr = Field(default=SecretStr(""))
+    postmark_message_stream: str = Field(default="outbound")
+    email_verification_token_expire_hours: int = Field(default=24, ge=1, le=168)
+    password_reset_token_expire_minutes: int = Field(default=60, ge=5, le=240)
 
     @field_validator("jwt_algorithm", mode="before")
     @classmethod
@@ -135,11 +146,27 @@ class Settings(BaseSettings):
     def validate_allowed_origins_for_environment(self) -> "Settings":
         """Require an explicit CORS allowlist outside development."""
         if self.environment != "production":
+            if self.email_delivery_mode == "postmark" and not (
+                self.postmark_server_token.get_secret_value().strip()
+            ):
+                msg = (
+                    "POSTMARK_SERVER_TOKEN must be configured when "
+                    "EMAIL_DELIVERY_MODE=postmark"
+                )
+                raise ValueError(msg)
             return self
 
         allowed_origins = self.allowed_origins.strip()
         if allowed_origins in {"", "*"}:
             msg = "ALLOWED_ORIGINS must be explicitly configured outside development"
+            raise ValueError(msg)
+        if self.email_delivery_mode == "postmark" and not (
+            self.postmark_server_token.get_secret_value().strip()
+        ):
+            msg = (
+                "POSTMARK_SERVER_TOKEN must be configured when "
+                "EMAIL_DELIVERY_MODE=postmark"
+            )
             raise ValueError(msg)
         return self
 

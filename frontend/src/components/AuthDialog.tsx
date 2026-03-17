@@ -4,7 +4,7 @@ import { useAuth } from "@/context/useAuth";
 import { getErrorMessage } from "@/lib/errors";
 import { toast } from "sonner";
 
-type Mode = "login" | "register";
+type Mode = "login" | "register" | "forgot-password";
 
 interface Props {
   open: boolean;
@@ -14,7 +14,7 @@ interface Props {
 }
 
 const AuthDialog = ({ open, mode, onModeChange, onClose }: Props) => {
-  const { login, register } = useAuth();
+  const { login, register, resendVerification, requestPasswordReset } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -37,7 +37,10 @@ const AuthDialog = ({ open, mode, onModeChange, onClose }: Props) => {
     try {
       if (mode === "register") {
         await register({ name, email, password });
-        toast.success("Account created. You are now logged in.");
+        toast.success("Account created. Verify your email before logging in.");
+      } else if (mode === "forgot-password") {
+        await requestPasswordReset(email);
+        toast.success("If that email exists, a reset link has been sent.");
       } else {
         await login({ email, password });
         toast.success("Logged in successfully.");
@@ -51,18 +54,36 @@ const AuthDialog = ({ open, mode, onModeChange, onClose }: Props) => {
     }
   };
 
+  const submitVerificationResend = async () => {
+    setIsSubmitting(true);
+    try {
+      await resendVerification(email);
+      toast.success("If that email can be verified, a new link has been sent.");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error) || "Could not resend verification email.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/30 p-4">
       <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-xl">
         <div className="mb-4 flex items-start justify-between">
           <div>
             <h2 className="text-lg font-semibold text-card-foreground">
-              {mode === "login" ? "Login" : "Create account"}
+              {mode === "login"
+                ? "Login"
+                : mode === "register"
+                  ? "Create account"
+                  : "Reset password"}
             </h2>
             <p className="text-xs text-muted-foreground">
               {mode === "login"
                 ? "Access your existing account."
-                : "Create your profile to get started."}
+                : mode === "register"
+                  ? "Create your profile and verify your email."
+                  : "Request a secure password reset link by email."}
             </p>
           </div>
           <button
@@ -109,39 +130,77 @@ const AuthDialog = ({ open, mode, onModeChange, onClose }: Props) => {
             />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground" htmlFor="auth-password">
-              Password
-            </label>
-            <input
-              id="auth-password"
-              type="password"
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder="••••••••"
-              required
-            />
-          </div>
+          {mode !== "forgot-password" && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="auth-password">
+                Password
+              </label>
+              <input
+                id="auth-password"
+                type="password"
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                placeholder="••••••••"
+                required
+              />
+            </div>
+          )}
 
           <button
             type="submit"
             disabled={isSubmitting}
             className="mt-1 w-full rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {mode === "login" ? "Login" : "Register"}
+            {mode === "login"
+              ? "Login"
+              : mode === "register"
+                ? "Register"
+                : "Send reset link"}
           </button>
         </form>
 
+        {mode === "login" && (
+          <div className="mt-3 flex items-center justify-between gap-3 text-xs">
+            <button
+              type="button"
+              onClick={() => onModeChange("forgot-password")}
+              className="font-medium text-primary hover:opacity-80"
+            >
+              Forgot password?
+            </button>
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={() => void submitVerificationResend()}
+              className="font-medium text-primary hover:opacity-80 disabled:opacity-60"
+            >
+              Resend verification
+            </button>
+          </div>
+        )}
+
         <div className="mt-4 text-center text-xs text-muted-foreground">
-          {mode === "login" ? "No account yet?" : "Already have an account?"}{" "}
+          {mode === "login"
+            ? "No account yet?"
+            : mode === "register"
+              ? "Already have an account?"
+              : "Back to login?"}{" "}
           <button
             type="button"
-            onClick={() => onModeChange(mode === "login" ? "register" : "login")}
+            onClick={() =>
+              onModeChange(
+                mode === "login" ? "register" : "login"
+              )
+            }
             className="font-medium text-primary hover:opacity-80"
           >
-            {mode === "login" ? "Register" : "Login"}
+            {mode === "login"
+              ? "Register"
+              : mode === "register"
+                ? "Login"
+                : "Login"}
           </button>
         </div>
       </div>

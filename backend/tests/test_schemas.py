@@ -101,6 +101,8 @@ def test_user_response_serialization():
         created_at=now,
         is_superuser=False,
         is_premium=False,
+        email_verified=True,
+        email_verified_at=now,
     )
     assert resp.id == uid
     assert resp.created_at == now
@@ -118,6 +120,8 @@ def test_user_response_from_attributes():
             self.updated_at = None
             self.is_superuser = True
             self.is_premium = True
+            self.email_verified = True
+            self.email_verified_at = None
             # extra fields should be ignored
             self.hashed_password = "hash"
 
@@ -140,6 +144,8 @@ def test_user_list_response():
         created_at=now,
         is_superuser=False,
         is_premium=False,
+        email_verified=True,
+        email_verified_at=None,
     )
 
     lst = UserListResponse(
