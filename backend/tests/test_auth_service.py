@@ -5,10 +5,12 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from jose import jwt
 from pydantic import SecretStr
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
 from src.core.security import hash_password
+from src.models.email_action_token import EmailActionToken
 from src.models.user import User
 from src.schemas.user import UserCreate, UserLogin
 from src.services.auth_service import (
@@ -374,6 +376,68 @@ async def test_verify_email_is_idempotent_for_already_verified_user(
 
     assert first_user.id == second_user.id
     assert second_user.email_verified is True
+
+
+@pytest.mark.asyncio
+async def test_verify_email_rejects_invalidated_older_token_after_resend(
+    db_session: AsyncSession,
+    fake_email_service,
+) -> None:
+    """A resent verification link must invalidate previously issued links."""
+    auth_service = AuthService(db_session, email_service=fake_email_service)
+    user = await auth_service.register_user(
+        UserCreate(
+            name="Verify User",
+            email="verify-resend@example.com",
+            password=SecretStr("SecurePass123"),
+        )
+    )
+
+    first_token = fake_email_service.messages[0].text_body.split("token=")[1].split()[0]
+
+    await auth_service.resend_verification_email(user.email)
+
+    second_token = fake_email_service.messages[-1].text_body.split("token=")[1].split()[0]
+    await auth_service.verify_email(second_token)
+
+    with pytest.raises(EmailActionTokenError):
+        await auth_service.verify_email(first_token)
+
+
+@pytest.mark.asyncio
+async def test_verify_email_rejects_expired_reuse_after_success(
+    db_session: AsyncSession,
+    fake_email_service,
+) -> None:
+    """An already-consumed verify token should not remain reusable after expiry."""
+    auth_service = AuthService(db_session, email_service=fake_email_service)
+    await auth_service.register_user(
+        UserCreate(
+            name="Verify User",
+            email="verify-expired@example.com",
+            password=SecretStr("SecurePass123"),
+        )
+    )
+
+    raw_token = fake_email_service.messages[0].text_body.split("token=")[1].split()[0]
+    verified_user = await auth_service.verify_email(raw_token)
+
+    verified_user.email_verified_at = datetime.now(UTC) - timedelta(days=2)
+
+    token_hash = auth_service._hash_action_token(raw_token)  # noqa: SLF001
+    result = await db_session.execute(
+        select(EmailActionToken).where(
+            EmailActionToken.token_hash == token_hash,
+            EmailActionToken.purpose == "verify_email",
+        )
+    )
+    token = result.scalar_one()
+    token.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    token.consumed_at = verified_user.email_verified_at
+    await db_session.flush()
+
+    with pytest.raises(EmailActionTokenError):
+        await auth_service.verify_email(raw_token)
 
 
 @pytest.mark.asyncio

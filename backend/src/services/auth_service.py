@@ -84,6 +84,12 @@ class AuthService:
             return f"{minutes} minute{'s' if minutes != 1 else ''}"
         return "a limited time"
 
+    @staticmethod
+    def _coerce_utc_datetime(value: datetime | None) -> datetime | None:
+        if value is None or value.tzinfo is not None:
+            return value
+        return value.replace(tzinfo=UTC)
+
     def _build_frontend_link(self, path: str, token: str) -> str:
         base_url = str(settings.frontend_base_url).rstrip("/")
         query = urlencode({"token": token})
@@ -133,8 +139,7 @@ class AuthService:
             raise TokenValidationError("Token missing subject")
         if payload.get("aud") != settings.jwt_audience:
             raise TokenValidationError(
-                "Token audience validation failed: "
-                "audience claim missing or invalid",
+                "Token audience validation failed: audience claim missing or invalid",
             )
         return payload
 
@@ -205,9 +210,9 @@ class AuthService:
         )
         token = result.scalar_one_or_none()
         now = datetime.now(UTC)
-        expires_at = token.expires_at if token is not None else None
-        if expires_at is not None and expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=UTC)
+        expires_at = (
+            self._coerce_utc_datetime(token.expires_at) if token is not None else None
+        )
         if (
             token is None
             or token.consumed_at is not None
@@ -345,11 +350,24 @@ class AuthService:
             raise EmailActionTokenError("Token is invalid or has expired.")
 
         user = await self.user_service.get_user_by_id(token.user_id)
+        now = datetime.now(UTC)
+        expires_at = self._coerce_utc_datetime(token.expires_at)
+        consumed_at = self._coerce_utc_datetime(token.consumed_at)
+        verified_at = (
+            self._coerce_utc_datetime(user.email_verified_at)
+            if user is not None
+            else None
+        )
         if (
             user is not None
             and not user.is_deleted
             and user.email_verified
             and user.email == token.email
+            and consumed_at is not None
+            and verified_at is not None
+            and consumed_at == verified_at
+            and expires_at is not None
+            and expires_at >= now
         ):
             return user
 
