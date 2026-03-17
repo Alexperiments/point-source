@@ -1,5 +1,24 @@
-import { ArrowLeft, Telescope, Github, Linkedin, ExternalLink } from "lucide-react";
+import * as Accordion from "@radix-ui/react-accordion";
+import { ArrowLeft, Telescope, Github, Linkedin, ChevronDown } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+
+const PayPalIcon = () => (
+  <svg
+    viewBox="0 0 24 24"
+    className="h-[15px] w-[15px]"
+    aria-hidden="true"
+    fill="none"
+  >
+    <path
+      d="M8.4 3.5h6.1c2.8 0 4.3 1.9 3.9 4.3-.5 3-2.8 4.7-5.9 4.7h-2l-.8 5.1H6.8L8.4 3.5Z"
+      fill="#003087"
+    />
+    <path
+      d="M10.2 8.2h4.6c2.3 0 3.7 1.4 3.3 3.4-.4 2.4-2.4 3.8-5 3.8h-1.6l-.6 3.8H8.2l2-11Z"
+      fill="#009CDE"
+    />
+  </svg>
+);
 
 const About = () => {
   const navigate = useNavigate();
@@ -33,12 +52,12 @@ const About = () => {
       ),
     },
     {
-      question: "What&apos;s a RAG?",
+      question: "What's a RAG?",
       answer: (
         <p>
           RAG stands for retrieval-augmented generation. In practice, that means the system first retrieves
           relevant passages from its document collection and then uses those passages to generate an answer,
-          rather than relying only on the model&apos;s internal memory.
+          rather than relying only on the model's internal memory.
         </p>
       ),
     },
@@ -79,7 +98,7 @@ const About = () => {
         {
           href: paypalUrl,
           label: "Support via PayPal",
-          icon: <ExternalLink size={15} />,
+          icon: <PayPalIcon />,
         },
       ],
     },
@@ -135,33 +154,46 @@ const About = () => {
           </p>
 
           <h2 className="text-xs uppercase tracking-wide text-muted-foreground pt-4">FAQ</h2>
-          <div className="space-y-3">
+          <Accordion.Root type="single" collapsible className="space-y-3">
             {faqs.map((faq) => (
-              <article
+              <Accordion.Item
                 key={faq.question}
-                className="rounded-2xl border border-border/80 bg-card/70 px-4 py-4 shadow-sm"
+                value={faq.question}
+                className="overflow-hidden rounded-2xl border border-border/80 bg-card/70 shadow-sm"
               >
-                <h3 className="text-sm font-semibold text-foreground">{faq.question}</h3>
-                <div className="mt-2 text-foreground/70">{faq.answer}</div>
-                {faq.actions ? (
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {faq.actions.map((action) => (
-                      <a
-                        key={action.label}
-                        href={action.href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={supportButtonClass}
-                      >
-                        {action.icon}
-                        {action.label}
-                      </a>
-                    ))}
+                <Accordion.Header>
+                  <Accordion.Trigger className="group flex w-full items-center justify-between gap-4 px-4 py-4 text-left text-sm font-semibold text-foreground transition-colors hover:bg-accent/40">
+                    <span>{faq.question}</span>
+                    <ChevronDown
+                      size={16}
+                      className="shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-180"
+                    />
+                  </Accordion.Trigger>
+                </Accordion.Header>
+                <Accordion.Content className="overflow-hidden text-foreground/70 data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down">
+                  <div className="border-t border-border/70 px-4 py-4">
+                    {faq.answer}
+                    {faq.actions ? (
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {faq.actions.map((action) => (
+                          <a
+                            key={action.label}
+                            href={action.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={supportButtonClass}
+                          >
+                            {action.icon}
+                            {action.label}
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-              </article>
+                </Accordion.Content>
+              </Accordion.Item>
             ))}
-          </div>
+          </Accordion.Root>
 
           <h2 className="text-xs uppercase tracking-wide text-muted-foreground pt-4">Contact</h2>
           <p className="text-foreground/70">
@@ -190,7 +222,7 @@ const About = () => {
               rel="noopener noreferrer"
               className={supportButtonClass}
             >
-              <ExternalLink size={15} /> PayPal
+              <PayPalIcon /> PayPal
             </a>
           </div>
         </section>
