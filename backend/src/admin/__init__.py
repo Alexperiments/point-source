@@ -160,7 +160,7 @@ def _safe_redirect_target(next_url: str | None, fallback_url: str) -> str:
 admin = Admin(
     engine=engine,
     title="Admin Panel",
-    base_url="/",
+    base_url="/admin",
     auth_provider=AdminAuthProvider(),
 )
 

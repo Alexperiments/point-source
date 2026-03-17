@@ -3,8 +3,9 @@ import ChatSidebar from "@/components/ChatSidebar";
 import ChatArea from "@/components/ChatArea";
 import { ChatStreamError, streamChat } from "@/lib/StreamChat";
 import { toast } from "sonner";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth } from "@/context/useAuth";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { getErrorMessage } from "@/lib/errors";
 import {
   createThread,
   deleteThread,
@@ -155,9 +156,9 @@ const Index = () => {
           }
           return loadedConversations[0]?.id ?? null;
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (!cancelled) {
-          toast.error(error?.message || "Failed to load chat history.");
+          toast.error(getErrorMessage(error) || "Failed to load chat history.");
         }
       }
     };
@@ -306,8 +307,8 @@ const Index = () => {
       } else {
         currentMessages = conversations.find((c) => c.id === convId)?.messages ?? [];
       }
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to create chat.");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error) || "Failed to create chat.");
       return;
     }
 
@@ -339,7 +340,7 @@ const Index = () => {
         apiMessages,
         assistantId,
       });
-    } catch (e: any) {
+    } catch (e: unknown) {
       setAgentStatus("idle");
       if (e instanceof ChatStreamError && e.code === "daily_quota") {
         if (typeof e.retryAfterSeconds === "number" && e.retryAfterSeconds > 1) {
@@ -356,7 +357,7 @@ const Index = () => {
         return;
       }
 
-      toast.error(e.message || "Failed to get response");
+      toast.error(getErrorMessage(e) || "Failed to get response");
     }
   };
 
@@ -382,8 +383,8 @@ const Index = () => {
         setActiveId((current) => (current === id ? (next[0]?.id ?? null) : current));
         return next;
       });
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to delete chat.");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error) || "Failed to delete chat.");
     }
   };
 

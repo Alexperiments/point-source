@@ -2,7 +2,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Cpu, Gauge, LogOut, Monitor, Moon, Save, Sun, User } from "lucide-react";
 import { AUTH_BASE_URL } from "@/lib/api";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth } from "@/context/useAuth";
+import { getErrorMessage } from "@/lib/errors";
 import { toast } from "sonner";
 
 type ThemePreference = "light" | "dark" | "system";
@@ -227,10 +228,10 @@ const Profile = () => {
         if (!cancelled) {
           setUsage(nextUsage);
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (!cancelled) {
           setUsage(null);
-          setUsageError(error?.message || "Failed to load usage.");
+          setUsageError(getErrorMessage(error) || "Failed to load usage.");
         }
       } finally {
         if (!cancelled) {
@@ -276,9 +277,9 @@ const Profile = () => {
           setUsage(nextUsage);
           setUsageError(null);
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (!cancelled) {
-          setUsageError(error?.message || "Failed to load usage.");
+          setUsageError(getErrorMessage(error) || "Failed to load usage.");
         }
       }
     };
@@ -288,7 +289,7 @@ const Profile = () => {
     return () => {
       cancelled = true;
     };
-  }, [user, usage?.resetAt, secondsUntilReset]);
+  }, [secondsUntilReset, usage, user]);
 
   const handleLogout = async () => {
     await logout();
@@ -310,8 +311,8 @@ const Profile = () => {
         name,
       });
       toast.success("Profile updated successfully.");
-    } catch (error: any) {
-      toast.error(error?.message || "Failed to update profile.");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error) || "Failed to update profile.");
     } finally {
       setIsSubmitting(false);
     }

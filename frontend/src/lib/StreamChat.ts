@@ -1,4 +1,5 @@
 import { CHAT_STREAM_URL } from "@/lib/api";
+import { isRecord } from "@/lib/errors";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -59,25 +60,49 @@ const parseRetryAfterSeconds = (value: string | null): number | null => {
   return seconds;
 };
 
+type StreamPayload = {
+  type?: string;
+  status?: string;
+  message?: string;
+  choices?: Array<{
+    delta?: {
+      content?: string;
+    };
+  }>;
+};
+
+const parseStreamPayload = (value: unknown): StreamPayload | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  return value as StreamPayload;
+};
+
 const handleParsedPayload = (
-  parsed: any,
+  parsed: unknown,
   onDelta: (deltaText: string) => void,
   onStatus?: (status: StreamStatus | string) => void
 ) => {
-  if (parsed?.type === "status") {
-    const status = parsed?.status;
+  const payload = parseStreamPayload(parsed);
+  if (!payload) {
+    return;
+  }
+
+  if (payload.type === "status") {
+    const status = payload.status;
     if (typeof status === "string") {
       onStatus?.(status);
     }
     return;
   }
 
-  if (parsed?.type === "error") {
-    const message = typeof parsed?.message === "string" ? parsed.message : "Stream failed.";
+  if (payload.type === "error") {
+    const message = typeof payload.message === "string" ? payload.message : "Stream failed.";
     throw new Error(message);
   }
 
-  const content = parsed?.choices?.[0]?.delta?.content as string | undefined;
+  const content = payload.choices?.[0]?.delta?.content;
   if (content) {
     onDelta(content);
   }

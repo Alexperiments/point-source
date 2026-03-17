@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import type { Conversation } from "@/pages/Index";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth } from "@/context/useAuth";
 import AuthDialog from "@/components/AuthDialog";
 import { toast } from "sonner";
 

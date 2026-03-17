@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { X } from "lucide-react";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth } from "@/context/useAuth";
+import { getErrorMessage } from "@/lib/errors";
 import { toast } from "sonner";
 
 type Mode = "login" | "register";
@@ -43,8 +44,8 @@ const AuthDialog = ({ open, mode, onModeChange, onClose }: Props) => {
       }
 
       onClose();
-    } catch (error: any) {
-      toast.error(error?.message || "Authentication failed.");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error) || "Authentication failed.");
     } finally {
       setIsSubmitting(false);
     }

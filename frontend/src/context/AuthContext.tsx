@@ -1,41 +1,6 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AUTH_BASE_URL } from "@/lib/api";
-
-export type AuthUser = {
-  id: string;
-  name: string;
-  email: string;
-};
-
-type LoginInput = {
-  email: string;
-  password: string;
-};
-
-type RegisterInput = {
-  name: string;
-  email: string;
-  password: string;
-};
-
-type ProfileUpdateInput = {
-  name: string;
-  email?: string;
-  currentPassword?: string;
-  newPassword?: string;
-  confirmPassword?: string;
-};
-
-type AuthContextValue = {
-  user: AuthUser | null;
-  isLoading: boolean;
-  login: (input: LoginInput) => Promise<void>;
-  register: (input: RegisterInput) => Promise<void>;
-  updateProfile: (input: ProfileUpdateInput) => Promise<void>;
-  logout: () => Promise<void>;
-};
-
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+import { AuthContext, type AuthUser } from "@/context/auth-context";
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
@@ -252,25 +217,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(null);
   };
 
-  const value = useMemo(
-    () => ({
-      user,
-      isLoading,
-      login,
-      register,
-      updateProfile,
-      logout,
-    }),
-    [user, isLoading]
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        isLoading,
+        login,
+        register,
+        updateProfile,
+        logout,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
   );
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-};
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error("useAuth must be used within an AuthProvider.");
-  }
-  return context;
 };
