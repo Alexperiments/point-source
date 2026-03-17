@@ -134,7 +134,7 @@ async def test_verify_email_allows_login(
     client: AsyncClient,
     fake_email_service,
 ) -> None:
-    """A valid verification link should activate the account."""
+    """A valid verification link should activate the account and start a session."""
     register_response = await client.post(
         "/v1/auth/register",
         json={
@@ -154,6 +154,12 @@ async def test_verify_email_allows_login(
     )
     assert verify_response.status_code == 200
     assert "verified" in verify_response.json()["message"].lower()
+    cookie_header = verify_response.headers.get("set-cookie", "")
+    assert f"{AUTH_COOKIE_NAME}=" in cookie_header
+
+    me_response = await client.get("/v1/auth/users/me")
+    assert me_response.status_code == 200
+    assert me_response.json()["email"] == "verify@example.com"
 
     login_response = await client.post(
         "/v1/auth/token",

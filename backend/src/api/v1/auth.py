@@ -129,17 +129,21 @@ async def request_email_verification(
 
 @router.post("/email/verify", response_model=ActionMessageResponse)
 async def verify_email(
+    response: Response,
     payload: EmailTokenRequest,
     db: Annotated[AsyncSession, Depends(get_async_session)],
+    redis: Annotated[Redis, Depends(get_redis)],
 ) -> ActionMessageResponse:
     """Consume an email verification token."""
-    auth_service = AuthService(db)
+    auth_service = AuthService(db, redis=redis)
     try:
-        await auth_service.verify_email(payload.token)
+        user = await auth_service.verify_email(payload.token)
     except EmailActionTokenError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    token = await auth_service.create_token_for_user(user)
+    set_auth_cookie(response, token.access_token)
     return ActionMessageResponse(
-        message="Email verified. You can now log in to Point-source.",
+        message="Email verified. Redirecting you to Point-source.",
     )
 
 
