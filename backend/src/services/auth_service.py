@@ -4,6 +4,7 @@ import hashlib
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
+from html import escape
 from urllib.parse import urlencode
 
 from jose import JWTError, jwt
@@ -94,6 +95,115 @@ class AuthService:
         base_url = str(settings.frontend_base_url).rstrip("/")
         query = urlencode({"token": token})
         return f"{base_url}{path}?{query}"
+
+    @staticmethod
+    def _build_auth_email_text(
+        *,
+        greeting_name: str,
+        intro: str,
+        action_label: str,
+        action_link: str,
+        expiration: str,
+        ignore_message: str,
+    ) -> str:
+        return (
+            f"Hi {greeting_name},\n\n"
+            f"{intro}\n\n"
+            f"{action_label}: {action_link}\n\n"
+            f"This link expires in {expiration}.\n\n"
+            "If the button does not work, copy and paste the full URL into your "
+            "browser.\n\n"
+            f"{ignore_message}\n"
+        )
+
+    @staticmethod
+    def _build_auth_email_html(
+        *,
+        preheader: str,
+        eyebrow: str,
+        title: str,
+        greeting_name: str,
+        intro: str,
+        action_label: str,
+        action_link: str,
+        expiration: str,
+        ignore_message: str,
+    ) -> str:
+        escaped_preheader = escape(preheader)
+        escaped_eyebrow = escape(eyebrow.upper())
+        escaped_title = escape(title)
+        escaped_name = escape(greeting_name)
+        escaped_intro = escape(intro)
+        escaped_label = escape(action_label)
+        escaped_link = escape(action_link, quote=True)
+        escaped_expiration = escape(expiration)
+        escaped_ignore_message = escape(ignore_message)
+
+        return f"""
+<!DOCTYPE html>
+<html lang="en">
+  <body style="margin:0;padding:0;background-color:#f4f1ed;color:#171717;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">
+      {escaped_preheader}
+    </div>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:linear-gradient(180deg,#f4f1ed 0%,#ece7e0 100%);padding:32px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:640px;">
+            <tr>
+              <td style="padding:0 0 16px 4px;font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:#58534d;font-weight:700;">
+                Point-source
+              </td>
+            </tr>
+            <tr>
+              <td style="background-color:#fbfaf8;border:1px solid #d8d1c7;border-radius:28px;padding:40px 36px;box-shadow:0 18px 40px rgba(23,23,23,0.08);">
+                <div style="font-size:11px;letter-spacing:0.2em;text-transform:uppercase;color:#4f46e5;font-weight:700;margin-bottom:18px;">
+                  {escaped_eyebrow}
+                </div>
+                <h1 style="margin:0 0 16px;font-size:32px;line-height:1.15;color:#171717;font-family:Georgia,'Times New Roman',serif;font-weight:600;">
+                  {escaped_title}
+                </h1>
+                <p style="margin:0 0 12px;font-size:16px;line-height:1.7;color:#2f2a24;">
+                  Hi {escaped_name},
+                </p>
+                <p style="margin:0 0 28px;font-size:16px;line-height:1.7;color:#2f2a24;">
+                  {escaped_intro}
+                </p>
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px;">
+                  <tr>
+                    <td align="center" bgcolor="#4f46e5" style="border-radius:999px;">
+                      <a href="{escaped_link}" style="display:inline-block;padding:14px 24px;font-size:15px;font-weight:700;line-height:1;text-decoration:none;color:#f5f7ff;">
+                        {escaped_label}
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+                <div style="margin:0 0 24px;padding:16px 18px;border-radius:20px;background-color:#f1ede7;border:1px solid #ddd4ca;">
+                  <p style="margin:0 0 10px;font-size:13px;line-height:1.6;color:#5e564d;font-weight:700;">
+                    Link expires in {escaped_expiration}
+                  </p>
+                  <p style="margin:0;font-size:13px;line-height:1.7;color:#5e564d;word-break:break-all;">
+                    If the button does not work, copy and paste this URL into your browser:<br />
+                    <a href="{escaped_link}" style="color:#4f46e5;text-decoration:underline;">{escaped_link}</a>
+                  </p>
+                </div>
+                <p style="margin:0;font-size:14px;line-height:1.7;color:#6b645d;">
+                  {escaped_ignore_message}
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:18px 8px 0;font-size:12px;line-height:1.7;color:#6f685f;text-align:center;">
+                Transactional security email from Point-source. This mailbox is not monitored.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
+""".strip()
 
     async def _get_token_version(self, user_id: uuid.UUID) -> int:
         if self.redis is None:
@@ -238,19 +348,30 @@ class AuthService:
         expiration = AuthService._format_expiration_window(
             hours=settings.email_verification_token_expire_hours,
         )
-        text_body = (
-            f"Hi {user.name},\n\n"
-            "Confirm your email address to finish creating your Point-source account.\n\n"
-            f"Verify your email: {verification_link}\n\n"
-            f"This link expires in {expiration}.\n"
-            "If you did not create a Point-source account, you can ignore this email.\n"
+        intro = (
+            "Confirm your email address to finish creating your Point-source account."
         )
-        html_body = (
-            f"<p>Hi {user.name},</p>"
-            "<p>Confirm your email address to finish creating your Point-source account.</p>"
-            f'<p><a href="{verification_link}">Verify your email</a></p>'
-            f"<p>This link expires in {expiration}.</p>"
-            "<p>If you did not create a Point-source account, you can ignore this email.</p>"
+        ignore_message = (
+            "If you did not create a Point-source account, you can ignore this email."
+        )
+        text_body = AuthService._build_auth_email_text(
+            greeting_name=user.name,
+            intro=intro,
+            action_label="Verify your email",
+            action_link=verification_link,
+            expiration=expiration,
+            ignore_message=ignore_message,
+        )
+        html_body = AuthService._build_auth_email_html(
+            preheader="Confirm your email to activate your Point-source account.",
+            eyebrow="Email verification",
+            title="Verify your email",
+            greeting_name=user.name,
+            intro=intro,
+            action_label="Verify email",
+            action_link=verification_link,
+            expiration=expiration,
+            ignore_message=ignore_message,
         )
         return EmailMessage(
             to_email=user.email,
@@ -265,19 +386,28 @@ class AuthService:
         expiration = AuthService._format_expiration_window(
             minutes=settings.password_reset_token_expire_minutes,
         )
-        text_body = (
-            f"Hi {user.name},\n\n"
-            "We received a request to reset your Point-source password.\n\n"
-            f"Reset your password: {reset_link}\n\n"
-            f"This link expires in {expiration}.\n"
-            "If you did not request a password reset, you can ignore this email.\n"
+        intro = "We received a request to reset your Point-source password."
+        ignore_message = (
+            "If you did not request a password reset, you can ignore this email."
         )
-        html_body = (
-            f"<p>Hi {user.name},</p>"
-            "<p>We received a request to reset your Point-source password.</p>"
-            f'<p><a href="{reset_link}">Reset your password</a></p>'
-            f"<p>This link expires in {expiration}.</p>"
-            "<p>If you did not request a password reset, you can ignore this email.</p>"
+        text_body = AuthService._build_auth_email_text(
+            greeting_name=user.name,
+            intro=intro,
+            action_label="Reset your password",
+            action_link=reset_link,
+            expiration=expiration,
+            ignore_message=ignore_message,
+        )
+        html_body = AuthService._build_auth_email_html(
+            preheader="Reset your Point-source password securely.",
+            eyebrow="Password reset",
+            title="Reset your password",
+            greeting_name=user.name,
+            intro=intro,
+            action_label="Reset password",
+            action_link=reset_link,
+            expiration=expiration,
+            ignore_message=ignore_message,
         )
         return EmailMessage(
             to_email=user.email,

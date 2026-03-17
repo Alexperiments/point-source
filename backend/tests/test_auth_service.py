@@ -65,6 +65,61 @@ async def test_register_user_success(
 
 
 @pytest.mark.asyncio
+async def test_verification_email_template_escapes_user_name(
+    db_session: AsyncSession,
+    fake_email_service,
+) -> None:
+    """Verification emails should escape user-controlled content in HTML."""
+    auth_service = AuthService(db_session, email_service=fake_email_service)
+
+    await auth_service.register_user(
+        UserCreate(
+            name="<Editor & Co.>",
+            email="escape@example.com",
+            password=SecretStr("SecurePass123"),
+        )
+    )
+
+    message = fake_email_service.messages[0]
+
+    assert message.subject == "Verify your Point-source email"
+    assert message.html_body is not None
+    assert "Verify email" in message.html_body
+    assert "&lt;Editor &amp; Co.&gt;" in message.html_body
+    assert "<Editor & Co.>" not in message.html_body
+    assert "copy and paste this URL into your browser" in message.html_body
+    assert "token=" in message.text_body
+
+
+@pytest.mark.asyncio
+async def test_password_reset_email_template_includes_fallback_link(
+    db_session: AsyncSession,
+    fake_email_service,
+) -> None:
+    """Password reset emails should include both CTA copy and the raw fallback URL."""
+    auth_service = AuthService(db_session, email_service=fake_email_service)
+    user = await auth_service.register_user(
+        UserCreate(
+            name="Reset User",
+            email="reset-template@example.com",
+            password=SecretStr("SecurePass123"),
+        )
+    )
+    fake_email_service.messages.clear()
+
+    await auth_service.request_password_reset(user.email)
+
+    message = fake_email_service.messages[0]
+
+    assert message.subject == "Reset your Point-source password"
+    assert message.html_body is not None
+    assert "Reset password" in message.html_body
+    assert "copy and paste this URL into your browser" in message.html_body
+    assert "Transactional security email from Point-source" in message.html_body
+    assert "token=" in message.text_body
+
+
+@pytest.mark.asyncio
 async def test_register_user_duplicate_email(
     db_session: AsyncSession,
     fake_email_service,
