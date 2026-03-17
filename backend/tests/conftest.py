@@ -1,6 +1,7 @@
 """Pytest configuration and fixtures."""
 
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -26,18 +27,59 @@ class _FakeRedis:
 
     def __init__(self) -> None:
         self._values: dict[str, str] = {}
+        self._expires_at: dict[str, datetime] = {}
+
+    def _purge_expired(self, key: str) -> None:
+        expires_at = self._expires_at.get(key)
+        if expires_at is None:
+            return
+        if expires_at <= datetime.now(UTC):
+            self._values.pop(key, None)
+            self._expires_at.pop(key, None)
 
     async def get(self, key: str) -> str | None:
+        self._purge_expired(key)
         return self._values.get(key)
 
-    async def set(self, key: str, value: str) -> bool:
+    async def set(
+        self,
+        key: str,
+        value: str,
+        ex: int | None = None,
+        nx: bool = False,
+    ) -> bool:
+        self._purge_expired(key)
+        if nx and key in self._values:
+            return False
         self._values[key] = value
+        if ex is not None:
+            self._expires_at[key] = datetime.now(UTC) + timedelta(seconds=ex)
+        else:
+            self._expires_at.pop(key, None)
         return True
 
     async def incr(self, key: str) -> int:
+        self._purge_expired(key)
         next_value = int(self._values.get(key, "0")) + 1
         self._values[key] = str(next_value)
         return next_value
+
+    async def ttl(self, key: str) -> int:
+        self._purge_expired(key)
+        if key not in self._values:
+            return -2
+        expires_at = self._expires_at.get(key)
+        if expires_at is None:
+            return -1
+        remaining = int((expires_at - datetime.now(UTC)).total_seconds())
+        return max(remaining, 0)
+
+    async def expire(self, key: str, seconds: int) -> bool:
+        self._purge_expired(key)
+        if key not in self._values:
+            return False
+        self._expires_at[key] = datetime.now(UTC) + timedelta(seconds=seconds)
+        return True
 
     async def aclose(self) -> None:
         return None

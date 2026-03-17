@@ -3,13 +3,18 @@
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import SecretStr, ValidationError
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database.base import get_async_session
 from src.core.database.redis import get_redis_pool
+from src.core.rate_limit import (
+    FixedWindowRateLimit,
+    enforce_fixed_window_rate_limit,
+    get_client_ip,
+)
 from src.core.security import (
     clear_auth_cookie,
     get_request_access_token,
@@ -52,6 +57,67 @@ from src.services.user_service import UserAlreadyExistsError, UserService
 
 router = APIRouter()
 
+REGISTER_IP_RATE_LIMIT = FixedWindowRateLimit(
+    bucket="auth:register:ip",
+    limit=6,
+    window_seconds=60 * 60,
+    error_message="Too many registration attempts. Please try again later.",
+)
+REGISTER_EMAIL_RATE_LIMIT = FixedWindowRateLimit(
+    bucket="auth:register:email",
+    limit=3,
+    window_seconds=60 * 60,
+    error_message="Too many registration attempts. Please try again later.",
+)
+LOGIN_IP_RATE_LIMIT = FixedWindowRateLimit(
+    bucket="auth:login:ip",
+    limit=20,
+    window_seconds=5 * 60,
+    error_message="Too many login attempts. Please wait a few minutes and try again.",
+)
+LOGIN_EMAIL_RATE_LIMIT = FixedWindowRateLimit(
+    bucket="auth:login:email",
+    limit=8,
+    window_seconds=15 * 60,
+    error_message="Too many login attempts. Please wait a few minutes and try again.",
+)
+VERIFY_REQUEST_IP_RATE_LIMIT = FixedWindowRateLimit(
+    bucket="auth:verify-request:ip",
+    limit=10,
+    window_seconds=60 * 60,
+    error_message="Too many verification email requests. Please try again later.",
+)
+VERIFY_REQUEST_EMAIL_RATE_LIMIT = FixedWindowRateLimit(
+    bucket="auth:verify-request:email",
+    limit=3,
+    window_seconds=60 * 60,
+    error_message="Too many verification email requests. Please try again later.",
+)
+VERIFY_ATTEMPT_IP_RATE_LIMIT = FixedWindowRateLimit(
+    bucket="auth:verify-attempt:ip",
+    limit=30,
+    window_seconds=15 * 60,
+    error_message="Too many verification attempts. Please request a new link if needed.",
+)
+PASSWORD_RESET_REQUEST_IP_RATE_LIMIT = FixedWindowRateLimit(
+    bucket="auth:password-reset-request:ip",
+    limit=10,
+    window_seconds=60 * 60,
+    error_message="Too many password reset requests. Please try again later.",
+)
+PASSWORD_RESET_REQUEST_EMAIL_RATE_LIMIT = FixedWindowRateLimit(
+    bucket="auth:password-reset-request:email",
+    limit=3,
+    window_seconds=60 * 60,
+    error_message="Too many password reset requests. Please try again later.",
+)
+PASSWORD_RESET_CONFIRM_IP_RATE_LIMIT = FixedWindowRateLimit(
+    bucket="auth:password-reset-confirm:ip",
+    limit=20,
+    window_seconds=15 * 60,
+    error_message="Too many password reset attempts. Please request a new link if needed.",
+)
+
 
 async def get_redis() -> AsyncIterator[Redis]:
     """Get Redis client dependency for auth/token operations."""
@@ -65,6 +131,94 @@ async def get_redis() -> AsyncIterator[Redis]:
 async def get_email_service() -> AsyncIterator[BaseEmailService]:
     """Get the configured outbound email service."""
     yield create_email_service()
+
+
+async def _enforce_rate_limits(
+    redis: Redis,
+    limits: tuple[tuple[FixedWindowRateLimit, str], ...],
+) -> None:
+    for rule, identifier in limits:
+        await enforce_fixed_window_rate_limit(redis, rule, identifier)
+
+
+async def _enforce_register_rate_limit(
+    request: Request,
+    redis: Redis,
+    email: str,
+) -> None:
+    client_ip = get_client_ip(request)
+    await _enforce_rate_limits(
+        redis,
+        (
+            (REGISTER_IP_RATE_LIMIT, client_ip),
+            (REGISTER_EMAIL_RATE_LIMIT, email),
+        ),
+    )
+
+
+async def _enforce_login_rate_limit(
+    request: Request,
+    redis: Redis,
+    email: str,
+) -> None:
+    client_ip = get_client_ip(request)
+    await _enforce_rate_limits(
+        redis,
+        (
+            (LOGIN_IP_RATE_LIMIT, client_ip),
+            (LOGIN_EMAIL_RATE_LIMIT, email),
+        ),
+    )
+
+
+async def _enforce_verification_request_rate_limit(
+    request: Request,
+    redis: Redis,
+    email: str,
+) -> None:
+    client_ip = get_client_ip(request)
+    await _enforce_rate_limits(
+        redis,
+        (
+            (VERIFY_REQUEST_IP_RATE_LIMIT, client_ip),
+            (VERIFY_REQUEST_EMAIL_RATE_LIMIT, email),
+        ),
+    )
+
+
+async def _enforce_verification_attempt_rate_limit(
+    request: Request,
+    redis: Redis,
+) -> None:
+    await _enforce_rate_limits(
+        redis,
+        ((VERIFY_ATTEMPT_IP_RATE_LIMIT, get_client_ip(request)),),
+    )
+
+
+async def _enforce_password_reset_request_rate_limit(
+    request: Request,
+    redis: Redis,
+    email: str,
+) -> None:
+    client_ip = get_client_ip(request)
+    await _enforce_rate_limits(
+        redis,
+        (
+            (PASSWORD_RESET_REQUEST_IP_RATE_LIMIT, client_ip),
+            (PASSWORD_RESET_REQUEST_EMAIL_RATE_LIMIT, email),
+        ),
+    )
+
+
+async def _enforce_password_reset_confirm_rate_limit(
+    request: Request,
+    redis: Redis,
+) -> None:
+    await _enforce_rate_limits(
+        redis,
+        ((PASSWORD_RESET_CONFIRM_IP_RATE_LIMIT, get_client_ip(request)),),
+    )
 
 
 async def get_current_user(
@@ -91,11 +245,14 @@ async def get_current_user(
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def register(
+    request: Request,
     user_data: UserCreate,
     db: Annotated[AsyncSession, Depends(get_async_session)],
+    redis: Annotated[Redis, Depends(get_redis)],
     email_service: Annotated[BaseEmailService, Depends(get_email_service)],
 ) -> RegistrationResponse:
     """Register a new user and send an email verification link."""
+    await _enforce_register_rate_limit(request, redis, str(user_data.email))
     try:
         auth_service = AuthService(db, email_service=email_service)
         user = await auth_service.register_user(user_data)
@@ -115,11 +272,14 @@ async def register(
 
 @router.post("/email/verify/request", response_model=ActionMessageResponse)
 async def request_email_verification(
+    request: Request,
     payload: EmailRequest,
     db: Annotated[AsyncSession, Depends(get_async_session)],
+    redis: Annotated[Redis, Depends(get_redis)],
     email_service: Annotated[BaseEmailService, Depends(get_email_service)],
 ) -> ActionMessageResponse:
     """Resend the email verification link if the account is not verified."""
+    await _enforce_verification_request_rate_limit(request, redis, str(payload.email))
     auth_service = AuthService(db, email_service=email_service)
     await auth_service.resend_verification_email(payload.email)
     return ActionMessageResponse(
@@ -129,12 +289,14 @@ async def request_email_verification(
 
 @router.post("/email/verify", response_model=ActionMessageResponse)
 async def verify_email(
+    request: Request,
     response: Response,
     payload: EmailTokenRequest,
     db: Annotated[AsyncSession, Depends(get_async_session)],
     redis: Annotated[Redis, Depends(get_redis)],
 ) -> ActionMessageResponse:
     """Consume an email verification token."""
+    await _enforce_verification_attempt_rate_limit(request, redis)
     auth_service = AuthService(db, redis=redis)
     try:
         user = await auth_service.verify_email(payload.token)
@@ -149,11 +311,14 @@ async def verify_email(
 
 @router.post("/password-reset/request", response_model=ActionMessageResponse)
 async def request_password_reset(
+    request: Request,
     payload: EmailRequest,
     db: Annotated[AsyncSession, Depends(get_async_session)],
+    redis: Annotated[Redis, Depends(get_redis)],
     email_service: Annotated[BaseEmailService, Depends(get_email_service)],
 ) -> ActionMessageResponse:
     """Send a password reset email without exposing account existence."""
+    await _enforce_password_reset_request_rate_limit(request, redis, str(payload.email))
     auth_service = AuthService(db, email_service=email_service)
     await auth_service.request_password_reset(payload.email)
     return ActionMessageResponse(
@@ -163,11 +328,13 @@ async def request_password_reset(
 
 @router.post("/password-reset/confirm", response_model=ActionMessageResponse)
 async def confirm_password_reset(
+    request: Request,
     payload: PasswordResetConfirmRequest,
     db: Annotated[AsyncSession, Depends(get_async_session)],
     redis: Annotated[Redis, Depends(get_redis)],
 ) -> ActionMessageResponse:
     """Consume a password reset token and rotate the user's password."""
+    await _enforce_password_reset_confirm_rate_limit(request, redis)
     auth_service = AuthService(db, redis=redis)
     try:
         await auth_service.reset_password(
@@ -183,12 +350,14 @@ async def confirm_password_reset(
 
 @router.post("/token", response_model=Token)
 async def login(
+    request: Request,
     response: Response,
     user_data: UserLogin,
     db: Annotated[AsyncSession, Depends(get_async_session)],
     redis: Annotated[Redis, Depends(get_redis)],
 ) -> Token:
     """Login a user."""
+    await _enforce_login_rate_limit(request, redis, str(user_data.email))
     try:
         auth_service = AuthService(db, redis)
         token = await auth_service.login(user_data)

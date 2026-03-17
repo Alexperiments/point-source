@@ -7,7 +7,11 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.v1.auth import get_redis as get_auth_redis
+from src.api.v1.auth import (
+    LOGIN_EMAIL_RATE_LIMIT,
+    PASSWORD_RESET_REQUEST_EMAIL_RATE_LIMIT,
+    get_redis as get_auth_redis,
+)
 from src.core.rag_config import AGENT_SETTINGS
 from src.core.security import AUTH_COOKIE_NAME, hash_password
 from src.main import app
@@ -185,6 +189,36 @@ async def test_request_password_reset_is_non_enumerating(
 
 
 @pytest.mark.asyncio
+async def test_password_reset_request_rate_limit_blocks_email_bombing(
+    client: AsyncClient,
+    fake_email_service,
+) -> None:
+    """Password reset requests should be throttled per normalized email."""
+    headers = {"X-Forwarded-For": "203.0.113.42"}
+
+    for _ in range(PASSWORD_RESET_REQUEST_EMAIL_RATE_LIMIT.limit):
+        response = await client.post(
+            "/v1/auth/password-reset/request",
+            json={"email": "bomb-target@example.com"},
+            headers=headers,
+        )
+        assert response.status_code == 200
+
+    limited_response = await client.post(
+        "/v1/auth/password-reset/request",
+        json={"email": "BOMB-TARGET@example.com"},
+        headers=headers,
+    )
+
+    assert limited_response.status_code == 429
+    assert "too many password reset requests" in (
+        limited_response.json()["detail"].lower()
+    )
+    assert int(limited_response.headers["retry-after"]) > 0
+    assert fake_email_service.messages == []
+
+
+@pytest.mark.asyncio
 async def test_password_reset_confirm_updates_password(
     client: AsyncClient,
     fake_email_service,
@@ -306,6 +340,47 @@ async def test_login_invalid_password(
 
     assert response.status_code == 401
     assert "incorrect email or password" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_login_rate_limit_blocks_excess_attempts(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """Login should be throttled before attackers can spam password checks indefinitely."""
+    user = User(
+        name="Test User",
+        email="limited-login@example.com",
+        hashed_password=hash_password("SecurePass123"),
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    headers = {"X-Forwarded-For": "198.51.100.25"}
+    for _ in range(LOGIN_EMAIL_RATE_LIMIT.limit):
+        response = await client.post(
+            "/v1/auth/token",
+            json={
+                "email": user.email,
+                "password": "WrongPassword123",
+            },
+            headers=headers,
+        )
+        assert response.status_code == 401
+
+    limited_response = await client.post(
+        "/v1/auth/token",
+        json={
+            "email": user.email.upper(),
+            "password": "WrongPassword123",
+        },
+        headers=headers,
+    )
+
+    assert limited_response.status_code == 429
+    assert "too many login attempts" in limited_response.json()["detail"].lower()
+    assert int(limited_response.headers["retry-after"]) > 0
 
 
 @pytest.mark.asyncio
