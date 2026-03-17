@@ -222,6 +222,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }),
     });
 
+    try {
+      const currentUser = await fetchCurrentUser();
+      setUser(currentUser);
+    } catch (error) {
+      setUser(null);
+      throw error;
+    }
+
     return response.message || "Email verified.";
   };
 
