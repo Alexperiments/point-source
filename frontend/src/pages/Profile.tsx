@@ -18,10 +18,10 @@ type UsageSummary = {
 };
 
 const PROFILE_PREFERENCES_KEY = "point-source.profile-preferences";
-const DEFAULT_MODEL_ID = "openai/gpt-5-mini";
+const DEFAULT_MODEL_ID = "openai/gpt-5.4-nano";
 
 const models = [
-  { id: DEFAULT_MODEL_ID, label: "GPT-5 Mini", desc: "Strong all-rounded" },
+  { id: DEFAULT_MODEL_ID, label: "GPT-5.4 Nano", desc: "Strong all-rounded" },
 ];
 
 const themes: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
