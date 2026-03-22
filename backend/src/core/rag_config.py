@@ -154,7 +154,7 @@ class AgentSettings(BaseSettings):
     )
 
     name: str = Field(default="Main Agent")
-    model_name: str = Field(default="gpt-5.4-nano")
+    model_name: str = Field(default="gpt-5-mini")
     temperature: float = Field(default=0.3, ge=0.0)
     max_tokens: int = Field(default=8192, ge=1)
     instruction_slug: str = Field(default="main_agent_instructions")
